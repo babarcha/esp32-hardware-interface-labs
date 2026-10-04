@@ -1,0 +1,26 @@
+# ESP-IDF build output
+build/
+**/build/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# VS Code local configuration
+.vscode/
+
+# ESP-IDF / CMake generated files
+sdkconfig.old
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+
+# Logs
+*.log
+
+# Windows
+Thumbs.db
+Desktop.ini
