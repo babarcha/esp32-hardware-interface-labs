@@ -1,22 +1,29 @@
+/*
+ * I2C Lab 02 — ESP-IDF master bus wrapper
+ *
+ * Owns one private bus handle and provides lifecycle, address probing,
+ * device registration, and blocking read/write operations to applications.
+ * The API deliberately separates bus handles from per-target device handles.
+ */
 #include <stdio.h>
 #include <stdint.h>
 
 #include "i2c_bus.h"
 #include "driver/i2c_master.h"
 
+/* Board-specific wiring and transaction timeout configuration. */
 #define I2C_SDA_GPIO 21
 #define I2C_SCL_GPIO 22
 #define I2C_GLITCH_FILTER 7
 #define I2C_PROBE_TIMEOUT_MS 50
 #define I2C_TRANSFER_TIMEOUT_MS 100
 
+/* NULL represents an uninitialized bus; the handle is module-private. */
 static i2c_master_bus_handle_t bus_handle = NULL;
 
 esp_err_t i2c_bus_init(void)
 {
-    /*
-     * Prevent accidental double initialization.
-     */
+    /* Avoid creating two drivers for the same logical bus instance. */
     if (bus_handle != NULL)
     {
         return ESP_ERR_INVALID_STATE;
@@ -31,6 +38,7 @@ esp_err_t i2c_bus_init(void)
         .flags.enable_internal_pullup = true,
     };
 
+    /* ESP-IDF allocates and configures the I2C master controller. */
     esp_err_t result = i2c_new_master_bus(
         &bus_config,
         &bus_handle);
@@ -52,6 +60,7 @@ esp_err_t i2c_bus_deinit(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    /* Release the controller; only clear our handle on success. */
     esp_err_t result = i2c_del_master_bus(bus_handle);
 
     if (result == ESP_OK)
@@ -69,6 +78,7 @@ esp_err_t i2c_bus_probe(uint8_t address)
         return ESP_ERR_INVALID_STATE;
     }
 
+    /* Acknowledgement means a target responds at this address. */
     return i2c_master_probe(
         bus_handle,
         address,
@@ -82,6 +92,7 @@ int i2c_bus_scan(void)
 
     printf("\nScanning I2C bus...\n");
 
+    /* 0x00–0x07 and 0x78–0x7F are excluded from this general scan. */
     for (uint8_t address = 0x08; address <= 0x77; address++)
     {
         addresses_checked++;
@@ -98,13 +109,11 @@ int i2c_bus_scan(void)
         }
         else if (result == ESP_ERR_NOT_FOUND)
         {
-            /*
-             * Normal condition:
-             * no target acknowledged this address.
-             */
+            /* No acknowledgement is expected for unused addresses. */
         }
         else
         {
+            /* Timeouts or driver errors should not be reported as ACKs. */
             printf(
                 "ERROR: address 0x%02X -> %s\n",
                 address,
@@ -134,6 +143,7 @@ esp_err_t i2c_bus_add_device(
         return ESP_ERR_INVALID_ARG;
     }
 
+    /* A device handle combines its target address and clock configuration. */
     i2c_device_config_t device_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = address,
@@ -154,6 +164,7 @@ esp_err_t i2c_bus_remove_device(
         return ESP_ERR_INVALID_ARG;
     }
 
+    /* Release the target registration without deleting the master bus. */
     return i2c_master_bus_rm_device(device_handle);
 }
 
@@ -169,6 +180,7 @@ esp_err_t i2c_bus_write(
         return ESP_ERR_INVALID_ARG;
     }
 
+    /* Blocking transfer: the driver owns START, address, ACK and STOP. */
     return i2c_master_transmit(
         device_handle,
         data,
@@ -188,6 +200,7 @@ esp_err_t i2c_bus_read(
         return ESP_ERR_INVALID_ARG;
     }
 
+    /* Blocking reception fills the caller-supplied buffer. */
     return i2c_master_receive(
         device_handle,
         data,
@@ -211,6 +224,7 @@ esp_err_t i2c_bus_write_read(
         return ESP_ERR_INVALID_ARG;
     }
 
+    /* Combined transaction uses a repeated START between write and read. */
     return i2c_master_transmit_receive(
         device_handle,
         write_data,
