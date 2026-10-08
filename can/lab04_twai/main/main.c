@@ -1,3 +1,8 @@
+/*
+ * CAN/TWAI Lab 04: boundary-validation application.
+ * Exercises API state and argument checks without transmitting a valid
+ * frame to a physical CAN network. See TUTORIAL.md for test scope.
+ */
 #include <stdio.h>
 
 #include "esp_err.h"
@@ -5,9 +10,11 @@
 
 #include "twai_bus.h"
 
+/* Counters summarize individual expectations, not bus-level communication. */
 static int tests_passed = 0;
 static int tests_failed = 0;
 
+/* Compare the returned ESP-IDF error code with the expected boundary result. */
 static void check_result(
     const char *name,
     esp_err_t actual,
@@ -39,6 +46,7 @@ void app_main(void)
 
     esp_err_t result;
 
+    /* Build a valid classical CAN data frame as the test fixture. */
     twai_message_t message = {0};
 
     message.identifier = 0x123;
@@ -64,6 +72,7 @@ void app_main(void)
     /*
      * Initialize and start.
      */
+    /* Install driver first; only then start the controller. */
     result = twai_bus_init();
 
     if (result != ESP_OK)
@@ -183,6 +192,7 @@ void app_main(void)
     /*
      * Normal stop.
      */
+    /* Stop the controller before uninstalling its driver. */
     result = twai_bus_stop();
 
     if (result != ESP_OK)
@@ -237,6 +247,7 @@ void app_main(void)
      * Summary.
      */
     printf("\n");
+    /* PASS means all expected return codes matched in this run. */
     printf("Validation summary\n");
     printf("------------------\n");
     printf("Passed : %d\n", tests_passed);

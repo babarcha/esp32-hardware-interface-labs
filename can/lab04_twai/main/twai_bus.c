@@ -1,3 +1,8 @@
+/*
+ * CAN/TWAI Lab 04: reusable ESP-IDF TWAI controller abstraction.
+ * Manages install/start/stop/uninstall and validates frame boundaries.
+ * This layer does not implement a physical CAN transceiver.
+ */
 #include <stdio.h>
 #include <stdbool.h>
 
@@ -8,6 +13,7 @@
 #define TWAI_TX_GPIO 21
 #define TWAI_RX_GPIO 22
 
+/* Software lifecycle flags track successful driver operations. */
 static bool driver_installed = false;
 static bool controller_started = false;
 
@@ -18,15 +24,19 @@ esp_err_t twai_bus_init(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    /* Normal mode requires an external transceiver and a real CAN bus
+     * for actual network communication; this lab tests API boundaries. */
     twai_general_config_t general_config =
         TWAI_GENERAL_CONFIG_DEFAULT(
             TWAI_TX_GPIO,
             TWAI_RX_GPIO,
             TWAI_MODE_NORMAL);
 
+    /* All communicating CAN nodes must agree on the nominal bitrate. */
     twai_timing_config_t timing_config =
         TWAI_TIMING_CONFIG_500KBITS();
 
+    /* Accept all identifiers; no application-level filtering here. */
     twai_filter_config_t filter_config =
         TWAI_FILTER_CONFIG_ACCEPT_ALL();
 
@@ -61,6 +71,7 @@ esp_err_t twai_bus_start(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    /* State changes only after the underlying ESP-IDF call succeeds. */
     esp_err_t result = twai_start();
 
     if (result == ESP_OK)
@@ -153,6 +164,8 @@ esp_err_t twai_bus_transmit(
         return ESP_ERR_INVALID_ARG;
     }
 
+    /* Convert milliseconds to FreeRTOS ticks for the blocking API.
+     * No valid-frame transmission is exercised by the test application. */
     return twai_transmit(
         message,
         pdMS_TO_TICKS(timeout_ms));
@@ -172,6 +185,7 @@ esp_err_t twai_bus_receive(
         return ESP_ERR_INVALID_ARG;
     }
 
+    /* Receive is meaningful only when a physical CAN peer is present. */
     return twai_receive(
         message,
         pdMS_TO_TICKS(timeout_ms));
