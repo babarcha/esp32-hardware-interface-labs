@@ -1,3 +1,10 @@
+/*
+ * SPI Lab 03 — ESP32 SPI Master application.
+ *
+ * Demonstrates SPI3 bus initialization, registration of a Mode 0 device,
+ * a synchronous full-duplex transfer, and orderly resource cleanup.
+ * No external peripheral is connected; RX bytes are not sensor readings.
+ */
 #include <stdio.h>
 #include <stdint.h>
 
@@ -14,9 +21,7 @@ void app_main(void)
     printf("SPI Lab 03 - Pass 5: Bus Abstraction\n");
     printf("------------------------------------\n");
 
-    /*
-     * Initialize physical SPI bus.
-     */
+    /* Configure the shared physical SPI bus before registering a device. */
     esp_err_t result = spi_bus_init();
 
     if (result != ESP_OK)
@@ -30,9 +35,7 @@ void app_main(void)
 
     printf("SPI bus initialized successfully\n");
 
-    /*
-     * Register logical SPI device.
-     */
+    /* Each SPI target has its own device handle and chip-select settings. */
     spi_device_handle_t device_handle = NULL;
 
     result = spi_device_register(
@@ -54,7 +57,8 @@ void app_main(void)
     printf("SPI device registered successfully\n");
 
     /*
-     * Example full-duplex transaction.
+     * SPI clocks data out on MOSI while sampling MISO simultaneously.
+     * This arbitrary payload exercises the driver, not a device protocol.
      */
     uint8_t tx_data[] = {
         0x9A,
@@ -99,9 +103,7 @@ void app_main(void)
             esp_err_to_name(result));
     }
 
-    /*
-     * Clean up.
-     */
+    /* Remove the device before freeing the shared bus resources. */
     result = spi_device_unregister(device_handle);
 
     if (result == ESP_OK)

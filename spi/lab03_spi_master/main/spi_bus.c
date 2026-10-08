@@ -1,3 +1,10 @@
+/*
+ * SPI Lab 03 — reusable SPI master bus abstraction.
+ *
+ * Keeps ESP-IDF host/pin configuration and transaction construction
+ * separate from the application. Operations return esp_err_t so callers
+ * can distinguish invalid state, invalid arguments, and driver failures.
+ */
 #include <stdbool.h>
 #include <string.h>
 
@@ -9,30 +16,18 @@
 
 #define SPI_HOST_USED SPI3_HOST
 
-/*
- * Track the lifecycle of the physical SPI bus.
- *
- * This prevents accidental operations such as:
- *
- *   init -> init
- *
- * or:
- *
- *   deinit -> deinit
- */
+/* Tracks bus ownership within this module; not a multi-threaded lock. */
 static bool bus_initialized = false;
 
 esp_err_t spi_bus_init(void)
 {
-    /*
-     * Do not initialize the same bus twice through
-     * this abstraction.
-     */
+    /* Reject duplicate initialization through this abstraction. */
     if (bus_initialized)
     {
         return ESP_ERR_INVALID_STATE;
     }
 
+    /* Standard single-bit SPI wiring; unused quad-data pins are disabled. */
     spi_bus_config_t bus_config = {
         .mosi_io_num = SPI_MOSI_GPIO,
         .miso_io_num = SPI_MISO_GPIO,
@@ -44,6 +39,7 @@ esp_err_t spi_bus_init(void)
         .max_transfer_sz = 0,
     };
 
+    /* ESP-IDF selects an available DMA channel for this SPI host. */
     esp_err_t result = spi_bus_initialize(
         SPI_HOST_USED,
         &bus_config,
@@ -59,19 +55,13 @@ esp_err_t spi_bus_init(void)
 
 esp_err_t spi_bus_deinit(void)
 {
-    /*
-     * Reject deinitialization if this abstraction
-     * has not initialized the bus.
-     */
+    /* A bus cannot be freed before it has been initialized. */
     if (!bus_initialized)
     {
         return ESP_ERR_INVALID_STATE;
     }
 
-    /*
-     * ESP-IDF will reject freeing the bus if
-     * registered devices still remain.
-     */
+    /* ESP-IDF requires registered devices to be removed first. */
     esp_err_t result = spi_bus_free(
         SPI_HOST_USED);
 
@@ -89,10 +79,7 @@ esp_err_t spi_device_register(
     uint8_t mode,
     spi_device_handle_t *device_handle)
 {
-    /*
-     * Device registration requires an initialized
-     * physical SPI bus.
-     */
+    /* Registering a target requires an initialized physical bus. */
     if (!bus_initialized)
     {
         return ESP_ERR_INVALID_STATE;
@@ -103,18 +90,13 @@ esp_err_t spi_device_register(
         return ESP_ERR_INVALID_ARG;
     }
 
-    /*
-     * Avoid accidentally overwriting an existing
-     * handle supplied by the caller.
-     */
+    /* The caller must provide an empty handle to avoid overwriting it. */
     if (*device_handle != NULL)
     {
         return ESP_ERR_INVALID_STATE;
     }
 
-    /*
-     * Basic device configuration validation.
-     */
+    /* Validate basic device configuration before invoking ESP-IDF. */
     if (cs_gpio < 0)
     {
         return ESP_ERR_INVALID_ARG;
@@ -130,6 +112,7 @@ esp_err_t spi_device_register(
         return ESP_ERR_INVALID_ARG;
     }
 
+    /* Chip select, frequency, and CPOL/CPHA mode are per-device settings. */
     spi_device_interface_config_t device_config = {
         .clock_speed_hz = clock_speed_hz,
         .mode = mode,
@@ -156,6 +139,7 @@ esp_err_t spi_device_unregister(
         return ESP_ERR_INVALID_ARG;
     }
 
+    /* Release the logical target before deinitializing the physical bus. */
     return spi_bus_remove_device(
         device_handle);
 }
@@ -177,6 +161,7 @@ esp_err_t spi_bus_write(
         return ESP_ERR_INVALID_ARG;
     }
 
+    /* Clear all optional transaction fields before setting required ones. */
     spi_transaction_t transaction;
 
     memset(
@@ -184,11 +169,13 @@ esp_err_t spi_bus_write(
         0,
         sizeof(transaction));
 
+    /* ESP-IDF expresses SPI transaction length in bits, not bytes. */
     transaction.length =
         data_length * 8;
 
     transaction.tx_buffer = tx_data;
 
+    /* Synchronous call: blocks until the transaction is completed. */
     return spi_device_transmit(
         device_handle,
         &transaction);
@@ -218,6 +205,7 @@ esp_err_t spi_bus_read(
         0,
         sizeof(transaction));
 
+    /* The master still generates clock pulses when receiving data. */
     transaction.length =
         data_length * 8;
 
@@ -258,6 +246,7 @@ esp_err_t spi_bus_transfer(
         0,
         sizeof(transaction));
 
+    /* Full duplex: every clocked byte transmits and receives together. */
     transaction.length =
         data_length * 8;
 
