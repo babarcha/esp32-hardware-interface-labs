@@ -35,4 +35,13 @@ void app_main(void)
     printf(
         "\nApplication: %d I2C device(s) detected\n",
         devices_found);
+
+    // Release the I2C controller after the demonstration.
+    result = i2c_bus_deinit();
+
+    if (result != ESP_OK)
+    {
+        printf("I2C cleanup failed: %s\n",
+               esp_err_to_name(result));
+    }
 }

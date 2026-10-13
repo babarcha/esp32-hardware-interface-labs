@@ -78,7 +78,12 @@ esp_err_t i2c_bus_probe(uint8_t address)
         return ESP_ERR_INVALID_STATE;
     }
 
-    /* Acknowledgement means a target responds at this address. */
+    // Only scan ordinary 7-bit I2C device addresses.
+    if (address < 0x08 || address > 0x77)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
     return i2c_master_probe(
         bus_handle,
         address,
@@ -138,12 +143,14 @@ esp_err_t i2c_bus_add_device(
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (device_handle == NULL)
+    // Reject invalid device configurations.
+    if (address < 0x08 || address > 0x77 ||
+        clock_speed_hz == 0 ||
+        device_handle == NULL)
     {
         return ESP_ERR_INVALID_ARG;
     }
 
-    /* A device handle combines its target address and clock configuration. */
     i2c_device_config_t device_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = address,
