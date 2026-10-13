@@ -1,0 +1,32 @@
+name: I2C native unit tests
+
+on:
+  push:
+    paths:
+      - 'i2c/lab02_i2c_master/main/i2c_bus.c'
+      - 'i2c/lab02_i2c_master/main/i2c_bus.h'
+      - 'i2c/lab02_i2c_master/tests/native/**'
+      - '.github/workflows/i2c-native-tests.yml'
+  pull_request:
+    paths:
+      - 'i2c/lab02_i2c_master/main/i2c_bus.c'
+      - 'i2c/lab02_i2c_master/main/i2c_bus.h'
+      - 'i2c/lab02_i2c_master/tests/native/**'
+      - '.github/workflows/i2c-native-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  native-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile I2C bus implementation with mock ESP-IDF driver
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -I i2c/lab02_i2c_master/tests/native/mocks \
+            -I i2c/lab02_i2c_master/main \
+            i2c/lab02_i2c_master/main/i2c_bus.c \
+            i2c/lab02_i2c_master/tests/native/test_i2c_bus.c \
+            -o /tmp/i2c_native_tests
+      - name: Run I2C native unit tests
+        run: /tmp/i2c_native_tests
