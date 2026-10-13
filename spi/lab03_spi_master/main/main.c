@@ -104,16 +104,26 @@ void app_main(void)
     }
 
     /* Remove the device before freeing the shared bus resources. */
+
     result = spi_device_unregister(device_handle);
 
-    if (result == ESP_OK)
+    if (result != ESP_OK)
     {
-        printf("SPI device removed successfully\n");
+        printf("SPI device removal failed: %s\n",
+               esp_err_to_name(result));
+        return;
     }
+
+    printf("SPI device removed successfully\n");
 
     result = spi_bus_deinit();
 
-    if (result == ESP_OK)
+    if (result != ESP_OK)
+    {
+        printf("SPI bus cleanup failed: %s\n",
+               esp_err_to_name(result));
+    }
+    else
     {
         printf("SPI bus released successfully\n");
     }
