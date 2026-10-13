@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "main.c"
+    SRCS "main.c" "protocol.c" "uart_bus.c"
     INCLUDE_DIRS "."
-    REQUIRES driver
+    REQUIRES esp_driver_uart
 )
