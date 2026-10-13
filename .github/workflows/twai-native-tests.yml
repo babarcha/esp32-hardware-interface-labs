@@ -1,0 +1,32 @@
+name: CAN TWAI native unit tests
+
+on:
+  push:
+    paths:
+      - 'can/lab04_twai/main/twai_bus.c'
+      - 'can/lab04_twai/main/twai_bus.h'
+      - 'can/lab04_twai/tests/native/**'
+      - '.github/workflows/twai-native-tests.yml'
+  pull_request:
+    paths:
+      - 'can/lab04_twai/main/twai_bus.c'
+      - 'can/lab04_twai/main/twai_bus.h'
+      - 'can/lab04_twai/tests/native/**'
+      - '.github/workflows/twai-native-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  native-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile production TWAI abstraction against mock ESP-IDF
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -I can/lab04_twai/tests/native/mocks \
+            -I can/lab04_twai/main \
+            can/lab04_twai/main/twai_bus.c \
+            can/lab04_twai/tests/native/test_twai_bus.c \
+            -o /tmp/twai_native_tests
+      - name: Run CAN TWAI native tests
+        run: /tmp/twai_native_tests
