@@ -1,305 +1,150 @@
 # UART Lab 01 — ESP32 UART Command/Response and Hardware-in-the-Loop Testing
 
-## 1. Purpose of the Lab
+**Repository:** `esp32-hardware-interface-labs`  
+**Lab:** `uart/lab01_uart_loopback`  
+**Platform:** ESP32, ESP-IDF v5.5.5, Windows 11, Python  
+**Status:** Modular firmware and host-side validation implemented; rerun hardware tests after firmware changes.
 
-This lab introduces UART communication on the ESP32 and demonstrates how an embedded device can be controlled and validated from a host PC.
+## 1. Purpose and learning objectives
 
-The project implements a simple command/response protocol between:
+This lab introduces UART communication between an ESP32 and a Windows PC. The ESP32 receives newline-terminated commands, processes them, and returns deterministic responses. A Python client can communicate with the board, and pytest can automate checks against a physical device.
 
-- an ESP32 running ESP-IDF firmware, and
-- a Python application running on a PC.
+By the end, you should understand:
 
-The same communication interface is then used by `pytest` to perform automated hardware-in-the-loop (HIL) testing.
+- UART signals, 115200 8N1 configuration, and USB-to-serial communication.
+- The difference between byte transport, line framing, and command interpretation.
+- ESP-IDF UART initialization, buffering, timeouts, and resource lifecycle.
+- Separation of application, peripheral abstraction, and protocol logic.
+- Host-driven testing and the distinction between successful builds and physical HIL validation.
 
-The complete path is:
+Despite the directory name `loopback`, this lab implements a **command/response protocol**, not a direct electrical TX-to-RX loopback test.
 
-```text
-Host PC
-   │
-   │ USB
-   ▼
-USB-to-Serial Interface
-   │
-   │ UART0
-   ▼
-ESP32 Firmware
-   │
-   ▼
-Command Parser
-   │
-   ▼
-Command Handler
-   │
-   ▼
-UART Response
-```
-
-For automated validation:
+## 2. Project structure
 
 ```text
-pytest
-  │
-  ▼
-PySerial
-  │
-  ▼
-COM3
-  │
-  ▼
-USB-to-Serial
-  │
-  ▼
-ESP32 UART0
-  │
-  ▼
-Firmware
-  │
-  ▼
-Response
-  │
-  ▼
-pytest assertion
-```
-
-This makes the lab more than a UART demonstration. It is a small example of a real embedded validation architecture.
-
----
-
-# 2. Learning Objectives
-
-After completing this lab, you should understand:
-
-- what UART communication is;
-- how UART differs from higher-level protocols;
-- how ESP32 UART peripherals are configured with ESP-IDF;
-- how bytes arrive from a serial connection;
-- how a simple text protocol can be designed;
-- how command framing works;
-- how received bytes can be converted into commands;
-- how firmware generates deterministic responses;
-- how Python communicates with physical embedded hardware;
-- how `pytest` can validate a real device;
-- what hardware-in-the-loop testing means;
-- why synchronization and timeouts matter in automated hardware testing.
-
----
-
-# 3. Project Structure
-
-The lab is organized into three main parts:
-
-```text
-lab01_uart_loopback/
-│
+uart/lab01_uart_loopback/
 ├── CMakeLists.txt
-│
 ├── main/
 │   ├── CMakeLists.txt
-│   └── main.c
-│
+│   ├── main.c              Application orchestration
+│   ├── uart_bus.c          UART0 initialization, read/write, cleanup
+│   ├── uart_bus.h          UART public API
+│   ├── protocol.c          Command processing
+│   └── protocol.h          Protocol public API
 ├── host/
-│   └── uart_client.py
-│
+│   └── uart_client.py      Manual PC-side serial client
 ├── tests/
-│   └── test_uart_protocol.py
-│
+│   └── test_uart_protocol.py  Host-side protocol tests
 └── TUTORIAL.md
 ```
 
-Each directory has a different responsibility.
+The firmware is intentionally small and divided by responsibility. `main.c` coordinates the application; `uart_bus.c` deals with ESP-IDF and serial I/O; `protocol.c` knows the commands. The Python tools are outside the firmware and do not need to be compiled into the ESP32 image.
 
-### `main/`
-
-Contains the ESP32 firmware.
-
-The firmware:
-
-1. configures UART0;
-2. receives bytes from the PC;
-3. assembles bytes into commands;
-4. processes those commands;
-5. sends responses back.
-
-### `host/`
-
-Contains a simple Python client.
-
-It allows us to manually communicate with the ESP32 and inspect the protocol.
-
-### `tests/`
-
-Contains automated `pytest` tests.
-
-These tests communicate with the physical ESP32 and verify its behavior.
-
-This separation is important:
+## 3. End-to-end architecture
 
 ```text
-Firmware              Host tool              Validation
-   │                      │                       │
- main.c             uart_client.py        test_uart_protocol.py
+Windows PC                          ESP32
+──────────                          ─────
+Python / pytest
+     │
+     ▼
+PySerial (COM3, 115200)
+     │
+     ▼
+USB-to-serial bridge ──────────► UART0 (ESP-IDF driver)
+                                      │
+                                      ▼
+                              uart_bus_read_line()
+                                      │ command string
+                                      ▼
+                                 app_main()
+                                      │
+                                      ▼
+                            protocol_process_command()
+                                      │ response string
+                                      ▼
+                              uart_bus_write_line()
+                                      │
+                                      ▼
+PC receives response ◄────────── UART0 / USB bridge
 ```
 
-The embedded firmware should not depend on the test implementation.
+This is a layered design, not three independent running programs inside the ESP32. `app_main()` calls the other two firmware modules synchronously.
 
----
+## 4. UART fundamentals
 
-# 4. What Is UART?
+UART stands for **Universal Asynchronous Receiver/Transmitter**. It sends serial bits without a separate clock wire. Both endpoints agree on a baud rate and frame format.
 
-UART stands for:
-
-**Universal Asynchronous Receiver/Transmitter**
-
-It is a hardware peripheral used for serial communication.
-
-"Serial" means bits are transmitted sequentially rather than over many parallel wires.
-
-A basic UART connection normally uses:
+A basic UART link requires:
 
 ```text
-Device A TX  ─────────► Device B RX
-Device A RX  ◄───────── Device B TX
-GND          ────────── GND
+Device A TX  ─────► Device B RX
+Device A RX  ◄───── Device B TX
+Device A GND ───── Device B GND
 ```
 
-`TX` means transmit.
+The lab uses **115200 8N1**:
 
-`RX` means receive.
+| Parameter | Value | Meaning |
+|---|---|---|
+| Baud rate | 115200 | Nominal symbols per second |
+| Data bits | 8 | Eight payload bits per character |
+| Parity | None | No parity bit |
+| Stop bits | 1 | One stop bit |
+| Flow control | None | No hardware RTS/CTS flow control |
 
-Unlike I²C or SPI, UART does not use a shared clock line.
+The development board's USB-to-serial bridge normally connects to **UART0**, which also carries boot and console logs. The host therefore may see ESP-IDF logging mixed with application responses. The lab's debug line `CMD: ...` is intentionally preserved because existing host-side tests use it for synchronization.
 
-That is why UART is called **asynchronous**.
+## 5. Firmware API boundaries
 
-Both devices must therefore agree on communication parameters beforehand.
-
----
-
-# 5. UART Configuration
-
-This lab uses:
-
-```text
-Baud rate : 115200
-Data bits : 8
-Parity    : None
-Stop bits : 1
-Flow ctrl : None
-```
-
-This configuration is commonly abbreviated as:
-
-```text
-115200 8N1
-```
-
-where:
-
-```text
-8 = eight data bits
-N = no parity
-1 = one stop bit
-```
-
-Both the PC and ESP32 must use compatible settings.
-
-The firmware defines:
+### `uart_bus.h` — public UART interface
 
 ```c
-#define UART_PORT UART_NUM_0
-#define UART_BAUD_RATE 115200
-#define RX_BUFFER_SIZE 128
+esp_err_t uart_bus_init(void);
+esp_err_t uart_bus_deinit(void);
+esp_err_t uart_bus_read_line(char *buffer, size_t capacity);
+esp_err_t uart_bus_write_line(const char *line);
 ```
 
-The Python host similarly uses:
+The caller does not need to know the UART port, buffer sizes, or low-level driver calls. Errors are reported using ESP-IDF's `esp_err_t` type.
 
-```python
-PORT = "COM3"
-BAUD_RATE = 115200
-```
-
-The baud rates must match.
-
----
-
-# 6. Why UART0 Is Used
-
-The lab uses:
+### `protocol.h` — public command interface
 
 ```c
-UART_NUM_0
+void protocol_process_command(
+    const char *command,
+    char *response,
+    size_t response_size);
 ```
 
-rather than UART2.
+The protocol module receives a complete command string and writes a response into the caller-provided buffer. It does not access UART hardware.
 
-On the development board used for this lab, UART0 is connected to the board's USB-to-serial interface.
+## 6. `uart_bus.c` — UART configuration and initialization
 
-Therefore:
-
-```text
-Python
-   │
-   │ COM3
-   ▼
-USB
-   │
-   ▼
-USB-to-Serial Interface
-   │
-   ▼
-ESP32 UART0
-```
-
-No external USB-to-UART adapter is required.
-
-This is also why ESP-IDF console output such as `printf()` can appear on the same serial connection.
-
----
-
-# 7. Firmware Architecture
-
-The firmware can be understood as four stages:
-
-```text
-UART initialization
-        │
-        ▼
-Receive bytes
-        │
-        ▼
-Build command
-        │
-        ▼
-Process command
-        │
-        ▼
-Send response
-```
-
-The main functions involved are:
-
-```text
-app_main()
-    │
-    ├── UART configuration
-    │
-    ├── uart_read_bytes()
-    │
-    ▼
-process_command()
-    │
-    ▼
-send_response()
-```
-
----
-
-# 8. UART Initialization
-
-The UART configuration is stored in:
+The module defines:
 
 ```c
-const uart_config_t uart_config = {
-    .baud_rate = UART_BAUD_RATE,
+#define LAB_UART UART_NUM_0
+#define LAB_BAUD_RATE 115200
+#define LAB_RX_BUFFER_SIZE 1024
+#define LAB_TX_BUFFER_SIZE 1024
+
+static bool initialized = false;
+```
+
+`initialized` is private to this source file. It tracks whether this abstraction has successfully installed the driver.
+
+`uart_bus_init()` first rejects a second initialization attempt:
+
+```c
+if (initialized) return ESP_ERR_INVALID_STATE;
+```
+
+It then configures the UART:
+
+```c
+uart_config_t config = {
+    .baud_rate = LAB_BAUD_RATE,
     .data_bits = UART_DATA_8_BITS,
     .parity = UART_PARITY_DISABLE,
     .stop_bits = UART_STOP_BITS_1,
@@ -308,1430 +153,276 @@ const uart_config_t uart_config = {
 };
 ```
 
-This structure describes how the UART peripheral should operate.
+The function calls `uart_param_config()` and then `uart_driver_install()` with 1024-byte RX and TX buffers. The flag changes to `true` **only if installation succeeds**. It leaves the board's existing UART0 pin routing unchanged rather than assigning new GPIOs.
 
-The driver is installed with:
+**Design lesson:** Separate configuration and driver lifecycle from application behavior, and never mark a peripheral ready before initialization succeeds.
 
-```c
-uart_driver_install(
-    UART_PORT,
-    RX_BUFFER_SIZE * 2,
-    0,
-    0,
-    NULL,
-    0);
-```
+## 7. `uart_bus.c` — reading a complete command
 
-An RX buffer is allocated because incoming serial data may arrive independently of when the application reads it.
+UART transfers bytes, not messages. The lab defines a message as a sequence of characters ending with a newline (`\n`).
 
-Conceptually:
-
-```text
-PC sends bytes
-      │
-      ▼
-UART hardware
-      │
-      ▼
-ESP-IDF RX ring buffer
-      │
-      ▼
-uart_read_bytes()
-      │
-      ▼
-application
-```
-
-The application therefore does not have to process every incoming electrical bit immediately.
-
----
-
-# 9. Receiving UART Data
-
-The firmware reads one byte at a time:
+The API is:
 
 ```c
-uint8_t byte;
-
-int length = uart_read_bytes(
-    UART_PORT,
-    &byte,
-    1,
-    pdMS_TO_TICKS(100));
+esp_err_t uart_bus_read_line(char *buffer, size_t capacity);
 ```
 
-The important arguments are:
-
-```text
-UART_PORT             which UART peripheral
-&byte                 where received data is stored
-1                     maximum bytes requested
-100 ms                read timeout
-```
-
-Reading one byte at a time is not necessarily the highest-performance design, but it makes the framing logic very easy to understand in this introductory lab.
-
----
-
-# 10. Why a Timeout Is Used
-
-The call does not wait forever.
-
-It uses:
+It first checks that the UART is initialized, the destination buffer is not `NULL`, and the capacity is at least two bytes (one character and a terminating `\0`). It then repeatedly reads **one byte at a time**:
 
 ```c
-pdMS_TO_TICKS(100)
+int received = uart_read_bytes(
+    LAB_UART, &byte, 1, pdMS_TO_TICKS(100));
 ```
 
-which converts 100 milliseconds into FreeRTOS scheduler ticks.
+- A negative return becomes `ESP_FAIL`.
+- Zero bytes means the 100 ms read timed out; the function continues waiting.
+- Carriage return (`\r`) is ignored.
+- Newline (`\n`) finishes the command; the function adds a null terminator.
 
-If no data arrives, the code receives no useful byte and executes:
+### Oversized commands
+
+The caller in `main.c` allocates a 128-byte command buffer. A maximum of **127 non-newline characters** can be stored, leaving one byte for `\0`.
+
+If a line exceeds the capacity, `uart_bus_read_line()` sets an overflow flag and **continues consuming input until the newline**. It then returns `ESP_ERR_INVALID_SIZE`.
+
+This matters because simply returning on the first excess byte would leave the rest of that command in the UART stream, where it could be mistaken for a new command.
+
+**Design lesson:** Framing and overflow recovery belong in the transport abstraction; command meaning belongs in the protocol module.
+
+## 8. `uart_bus.c` — writing a response
 
 ```c
-if (length <= 0)
-{
-    continue;
+esp_err_t uart_bus_write_line(const char *line);
+```
+
+The function checks the driver state and pointer, then calls `uart_write_bytes()` for the response text. It separately appends `\r\n` and waits for TX completion using:
+
+```c
+uart_wait_tx_done(LAB_UART, pdMS_TO_TICKS(1000));
+```
+
+The return value indicates whether the driver accepted/transmitted the bytes according to its API. It does not prove that a host application correctly parsed the response; that is checked separately at the host.
+
+### Cleanup
+
+`uart_bus_deinit()` rejects deinitialization when the driver is not initialized. Otherwise it calls `uart_driver_delete()` and clears the private flag only on success. The present `app_main()` runs continuously and does not normally call deinitialization.
+
+## 9. `protocol.c` — interpreting commands
+
+The protocol implementation uses `strcmp()` for exact matches and `snprintf()` to format bounded responses.
+
+| Command | Response | Purpose |
+|---|---|---|
+| `PING` | `PONG` | Basic communication check |
+| `GET_INFO` | `MODEL=ESP32;FW=1.0.0` | Device information |
+| `GET_COUNTER` | `COUNTER=n` | Stateful behavior; increments each request |
+| Unknown command | `ERROR=UNKNOWN_COMMAND` | Defined negative response |
+
+For example:
+
+```c
+if (strcmp(command, "PING") == 0) {
+    snprintf(response, response_size, "PONG");
+} else if (strcmp(command, "GET_INFO") == 0) {
+    snprintf(response, response_size, "MODEL=ESP32;FW=1.0.0");
+} else if (strcmp(command, "GET_COUNTER") == 0) {
+    snprintf(response, response_size, "COUNTER=%u", ++counter);
+} else {
+    snprintf(response, response_size, "ERROR=UNKNOWN_COMMAND");
 }
 ```
 
-This returns execution to the beginning of the loop.
+The counter is a private static unsigned integer initialized to zero when the firmware starts. It is **not persistent across resets**. A `GET_COUNTER` response is useful for checking repeated command handling, but the precise value depends on earlier requests during the current run.
 
-A timeout is particularly important in embedded systems because blocking indefinitely can prevent other work from being performed.
+**Design lesson:** A command parser should not depend on GPIO pins, UART ports, or ESP-IDF driver internals.
 
----
+## 10. `main.c` — application orchestration
 
-# 11. From Bytes to Commands
-
-UART itself only transfers bytes.
-
-It does not understand commands such as:
-
-```text
-PING
-GET_INFO
-GET_COUNTER
-```
-
-The application must define that protocol.
-
-Suppose Python sends:
-
-```text
-PING\n
-```
-
-The ESP32 receives approximately:
-
-```text
-'P'
-'I'
-'N'
-'G'
-'\n'
-```
-
-The firmware stores each normal character:
+`app_main()` is short because it delegates specialized work:
 
 ```c
-command[command_length++] = (char)byte;
-```
+#define COMMAND_CAPACITY 128
+#define RESPONSE_CAPACITY 128
 
-After four characters:
-
-```text
-command
-┌───┬───┬───┬───┐
-│ P │ I │ N │ G │
-└───┴───┴───┴───┘
-
-command_length = 4
-```
-
-The newline tells the firmware that the command is complete.
-
----
-
-# 12. Command Framing
-
-The protocol uses newline characters as message delimiters.
-
-The firmware checks:
-
-```c
-if (byte == '\n' || byte == '\r')
-```
-
-This means either:
-
-```text
-LF  = \n
-CR  = \r
-```
-
-can terminate a command.
-
-This is an example of **message framing**.
-
-Without framing, a stream such as:
-
-```text
-PINGGET_INFOGET_COUNTER
-```
-
-would not tell the receiver where one command ends and another begins.
-
-With newline framing:
-
-```text
-PING\n
-GET_INFO\n
-GET_COUNTER\n
-```
-
-the boundaries are explicit.
-
----
-
-# 13. C String Termination
-
-The received UART characters are initially just bytes in an array.
-
-Before passing the command to C string functions, the firmware adds:
-
-```c
-command[command_length] = '\0';
-```
-
-For `PING`, memory then conceptually contains:
-
-```text
-P  I  N  G  \0
-```
-
-The null byte tells C string functions where the string ends.
-
-Without this terminator, functions such as:
-
-```c
-strcmp()
-```
-
-could continue reading beyond the valid command.
-
----
-
-# 14. Buffer Overflow Protection
-
-The command buffer is:
-
-```c
-char command[RX_BUFFER_SIZE];
-```
-
-with:
-
-```c
-#define RX_BUFFER_SIZE 128
-```
-
-The firmware only stores another character when:
-
-```c
-command_length < RX_BUFFER_SIZE - 1
-```
-
-The final byte is reserved for:
-
-```c
-'\0'
-```
-
-Conceptually:
-
-```text
-0                                      126 127
-┌──────────────────────────────────────────┬───┐
-│              command data                │\0 │
-└──────────────────────────────────────────┴───┘
-```
-
-This is a basic but important defensive programming technique in C.
-
----
-
-# 15. Command Processing
-
-Once a complete command is available, the firmware calls:
-
-```c
-process_command(command);
-```
-
-The handler compares the received string with known commands.
-
-For example:
-
-```c
-if (strcmp(command, "PING") == 0)
+void app_main(void)
 {
-    send_response("PONG");
+    esp_err_t err = uart_bus_init();
+    if (err != ESP_OK) {
+        printf("UART initialization failed: %s\n", esp_err_to_name(err));
+        return;
+    }
+
+    char command[COMMAND_CAPACITY];
+    char response[RESPONSE_CAPACITY];
+
+    while (1) {
+        err = uart_bus_read_line(command, sizeof(command));
+        if (err == ESP_ERR_INVALID_SIZE) {
+            uart_bus_write_line("ERROR=COMMAND_TOO_LONG");
+            continue;
+        }
+        if (err != ESP_OK) {
+            printf("UART read failed: %s\n", esp_err_to_name(err));
+            continue;
+        }
+
+        printf("CMD: %s\n", command);
+        fflush(stdout);
+        protocol_process_command(command, response, sizeof(response));
+        err = uart_bus_write_line(response);
+        if (err != ESP_OK)
+            printf("UART write failed: %s\n", esp_err_to_name(err));
+    }
 }
 ```
 
-`strcmp()` returns zero when two strings are equal.
+The `CMD:` debug line is part of the current host-test synchronization behavior, even though it is not a protocol response. Because console and command traffic share UART0, host code should distinguish debug output from actual responses.
 
-The lab supports:
+Notice that the oversized-command branch sends an error and resumes the loop; it does not pass the invalid command to `protocol_process_command()`.
 
-```text
-Command        Response
--------------  ----------------------
-PING           PONG
-GET_INFO       MODEL=ESP32;FW=1.0.0
-GET_COUNTER    COUNTER=n
-anything else  ERROR=UNKNOWN_COMMAND
-```
+## 11. Example command exchange
 
-This forms a very small application-layer protocol.
-
-UART transports the bytes.
-
-The application defines what those bytes mean.
-
----
-
-# 16. PING — Connectivity Test
-
-The simplest command is:
+A host sends newline-terminated commands; the firmware sends CRLF-terminated responses. The following shows the **logical protocol responses**, omitting possible boot/debug lines:
 
 ```text
-PING
+Host → ESP32: PING\n
+ESP32 → Host: PONG\r\n
+
+Host → ESP32: GET_INFO\n
+ESP32 → Host: MODEL=ESP32;FW=1.0.0\r\n
+
+Host → ESP32: GET_COUNTER\n
+ESP32 → Host: COUNTER=1\r\n
+
+Host → ESP32: HELLO\n
+ESP32 → Host: ERROR=UNKNOWN_COMMAND\r\n
 ```
 
-and the expected response is:
+For an oversized command, the expected response is:
 
 ```text
-PONG
+ERROR=COMMAND_TOO_LONG
 ```
 
-This is useful because it validates the complete communication path:
+`COUNTER=1` assumes this is the first `GET_COUNTER` request since boot.
+
+## 12. Host-side Python client
+
+The file `host/uart_client.py` provides a PC-side interface for exchanging commands with the board. Python communicates through a serial port such as `COM3` using PySerial. The port name is machine-dependent.
+
+Typical responsibilities are:
+
+1. Open the selected serial port with matching UART settings.
+2. Send a newline-terminated command.
+3. Read and interpret incoming serial lines.
+4. Display the device response or report a timeout.
+5. Close the port when finished.
+
+Because the same UART0 connection can carry ESP-IDF logs and `CMD:` debug output, a robust client should recognize the intended response rather than assuming every line is a response.
+
+## 13. Automated hardware-in-the-loop testing
+
+The `tests/test_uart_protocol.py` module provides host-side tests for the command protocol. In this arrangement:
 
 ```text
-PC
- │
- ▼
-serial port
- │
- ▼
-USB interface
- │
- ▼
-ESP32 UART
- │
- ▼
-command parser
- │
- ▼
-response
- │
- ▼
-PC
-```
-
-A simple connectivity command is common in embedded test interfaces.
-
----
-
-# 17. GET_INFO — Device Identification
-
-The command:
-
-```text
-GET_INFO
-```
-
-returns:
-
-```text
-MODEL=ESP32;FW=1.0.0
-```
-
-This demonstrates how a validation system can query information about the DUT.
-
-DUT means:
-
-**Device Under Test**
-
-In a production system, similar information might include:
-
-```text
-hardware revision
-firmware version
-serial number
-bootloader version
-manufacturing ID
-```
-
-This information can be important when deciding which tests should run against a particular product revision.
-
----
-
-# 18. GET_COUNTER — Stateful Behavior
-
-The firmware contains:
-
-```c
-static int counter = 0;
-```
-
-The command:
-
-```text
-GET_COUNTER
-```
-
-returns the current value and increments it:
-
-```c
-"COUNTER=%d", counter++
-```
-
-For example:
-
-```text
-COUNTER=0
-COUNTER=1
-COUNTER=2
-COUNTER=3
-```
-
-This command demonstrates **stateful behavior**.
-
-Unlike `PING`, the response depends on previous interactions with the device.
-
-This becomes important when designing tests.
-
-A good test should not assume that the first value must always be zero.
-
-Instead, it verifies the actual requirement:
-
-```text
-second value = first value + 1
-```
-
----
-
-# 19. Unknown Command Handling
-
-If no known command matches, the firmware sends:
-
-```text
-ERROR=UNKNOWN_COMMAND
-```
-
-This is preferable to silently ignoring invalid input.
-
-A deterministic error response helps:
-
-- debugging;
-- automated testing;
-- protocol diagnosis;
-- fault handling.
-
-A well-designed embedded protocol should define both successful and unsuccessful behavior.
-
----
-
-# 20. Sending Responses
-
-Responses are transmitted by:
-
-```c
-static void send_response(const char *response)
-```
-
-The function first sends the response text:
-
-```c
-uart_write_bytes(
-    UART_PORT,
-    response,
-    strlen(response));
-```
-
-and then:
-
-```c
-uart_write_bytes(
-    UART_PORT,
-    "\r\n",
-    2);
-```
-
-Therefore every response becomes a complete line.
-
-For example:
-
-```text
-PONG\r\n
-```
-
-The host can then use line-oriented reads.
-
----
-
-# 21. Diagnostic Output
-
-Before processing a command, the firmware prints:
-
-```c
-printf("CMD: %s\n", command);
-```
-
-Therefore a transaction looks like:
-
-```text
-CMD: PING
-PONG
-```
-
-The first line is diagnostic output.
-
-The second line is the actual protocol response.
-
-This distinction is important for the host-side test implementation.
-
----
-
-# 22. Python Host Client
-
-The manual host application is:
-
-```text
-host/uart_client.py
-```
-
-It uses PySerial:
-
-```python
-import serial
-```
-
-and opens:
-
-```python
-serial.Serial(PORT, BAUD_RATE, timeout=1)
-```
-
-For this setup:
-
-```text
-PORT      = COM3
-BAUD_RATE = 115200
-```
-
-The host and firmware must agree on the serial settings.
-
----
-
-# 23. Why the Host Waits Two Seconds
-
-After opening COM3:
-
-```python
-time.sleep(2)
-```
-
-is executed.
-
-Opening the serial connection may reset the ESP32 depending on the development board and USB-to-serial circuitry.
-
-The firmware then needs time to boot.
-
-The sequence can therefore be:
-
-```text
-Python opens COM3
+pytest assertion
        │
        ▼
-ESP32 resets
+Python serial client
        │
        ▼
-bootloader runs
+USB-to-serial interface
        │
        ▼
-ESP-IDF starts
+ESP32 firmware running on real hardware
        │
        ▼
-app_main()
+Observed serial response
 ```
 
-Sending commands immediately could cause them to arrive before the firmware is ready.
+This is **hardware-in-the-loop (HIL)** because the test controls and observes an actual ESP32, rather than only calling a software simulation.
 
----
+Useful checks include valid commands, unknown commands, counter progression, response formatting, and recovery after malformed or oversized input. The exact automated assertions should be read from the test file, rather than inferred from this list of possible checks.
 
-# 24. Clearing Boot Messages
+A successful pytest run demonstrates the specific behaviors exercised by those tests on that device and firmware revision. It does not prove every possible UART failure mode or electrical timing characteristic.
 
-ESP-IDF generates boot output during startup.
+## 14. Build, flash, and monitor
 
-Before starting protocol communication, the host executes:
-
-```python
-ser.reset_input_buffer()
-```
-
-This discards old serial data.
-
-Without it, the first call to:
-
-```python
-ser.readline()
-```
-
-might return a boot message rather than the response to `PING`.
-
-This illustrates an important validation principle:
-
-**Synchronize the test environment before making assertions.**
-
----
-
-# 25. Sending Commands from Python
-
-The host sends:
-
-```python
-ser.write((command + "\n").encode("utf-8"))
-```
-
-There are three steps here.
-
-First:
-
-```python
-command + "\n"
-```
-
-adds the protocol delimiter.
-
-For `PING`:
-
-```text
-PING
-```
-
-becomes:
-
-```text
-PING\n
-```
-
-Second:
-
-```python
-.encode("utf-8")
-```
-
-converts the Python string into bytes.
-
-Serial interfaces transmit bytes, not Python string objects.
-
-Finally:
-
-```python
-ser.write(...)
-```
-
-passes those bytes to the serial port.
-
----
-
-# 26. Reading Responses
-
-The firmware currently produces:
-
-```text
-CMD: PING
-PONG
-```
-
-The manual host client therefore reads two lines:
-
-```python
-line1 = ser.readline()
-line2 = ser.readline()
-```
-
-The bytes are decoded:
-
-```python
-.decode("utf-8")
-```
-
-and whitespace/newline characters are removed with:
-
-```python
-.strip()
-```
-
-The resulting strings can then be displayed normally.
-
----
-
-# 27. From Manual Testing to Automated Testing
-
-The host client proves that communication works manually.
-
-But repeatedly checking output by eye is not scalable.
-
-Instead of asking:
-
-```text
-Did the ESP32 print PONG?
-```
-
-we want software to check:
-
-```python
-assert response == "PONG"
-```
-
-This is the transition from manual testing to automated validation.
-
----
-
-# 28. Hardware-in-the-Loop Testing
-
-The tests in:
-
-```text
-tests/test_uart_protocol.py
-```
-
-are HIL tests because they communicate with a real physical ESP32.
-
-The test path is:
-
-```text
-pytest
-  │
-  ▼
-PySerial
-  │
-  ▼
-Windows COM3
-  │
-  ▼
-USB-to-Serial
-  │
-  ▼
-Physical ESP32
-  │
-  ▼
-Firmware
-```
-
-This is different from a unit test.
-
-A unit test might test a function entirely inside the PC:
-
-```text
-pytest → Python function
-```
-
-Our HIL test includes actual hardware:
-
-```text
-pytest → serial interface → physical DUT
-```
-
-Therefore it can detect problems that pure software tests cannot, including communication and device-integration failures.
-
----
-
-# 29. pytest Fixture
-
-The serial connection is created with:
-
-```python
-@pytest.fixture(scope="module")
-def uart():
-```
-
-The fixture:
-
-1. opens COM3;
-2. waits for the ESP32;
-3. clears old input;
-4. gives the serial connection to the tests;
-5. closes it when testing is finished.
-
-Conceptually:
-
-```text
-pytest starts
-     │
-     ▼
-open COM3
-     │
-     ▼
-run test_ping
-     │
-     ▼
-run test_get_info
-     │
-     ▼
-run test_counter
-     │
-     ▼
-run test_unknown_command
-     │
-     ▼
-close COM3
-```
-
-The fixture has:
-
-```python
-scope="module"
-```
-
-so the serial port is opened once for the complete test module rather than once for every test.
-
-This avoids repeatedly resetting the ESP32.
-
----
-
-# 30. The `yield` Fixture Pattern
-
-The fixture contains:
-
-```python
-yield ser
-```
-
-Everything before `yield` is setup.
-
-Everything after `yield` is cleanup.
-
-Conceptually:
-
-```text
-SETUP
-  open serial port
-  wait
-  clear buffer
-
-        │
-        ▼
-
-      yield ser
-
-        │
-        ▼
-
-TESTS EXECUTE
-
-        │
-        ▼
-
-CLEANUP
-  close serial port
-```
-
-This pattern is widely used for hardware test resources.
-
----
-
-# 31. `send_command()` as a Test Abstraction
-
-Rather than duplicating serial communication logic in every test, the project defines:
-
-```python
-send_command(ser, command)
-```
-
-Individual tests can therefore focus on behavior:
-
-```python
-debug, response = send_command(uart, "PING")
-
-assert debug == "CMD: PING"
-assert response == "PONG"
-```
-
-instead of repeatedly implementing:
-
-```text
-clear buffer
-encode command
-write UART
-read lines
-decode bytes
-handle timeout
-```
-
-This is an important validation-software design principle:
-
-**separate transport mechanics from test intent.**
-
----
-
-# 32. Synchronizing with the DUT
-
-Serial communication may contain unrelated output.
-
-The test therefore does not blindly assume that the first line received is the response.
-
-Instead, it waits for:
-
-```text
-CMD: <command>
-```
-
-For:
-
-```text
-PING
-```
-
-it expects:
-
-```text
-CMD: PING
-```
-
-Only after seeing that line does it accept the next meaningful line as the response.
-
-Conceptually:
-
-```text
-serial stream
-     │
-     ├── possible unrelated output
-     ├── possible unrelated output
-     │
-     ├── CMD: PING        ← synchronization point
-     │
-     └── PONG             ← response
-```
-
-This makes the HIL test more robust.
-
----
-
-# 33. Why Tests Need a Deadline
-
-The test helper defines:
-
-```python
-deadline = time.time() + 2.0
-```
-
-and loops only until that deadline.
-
-Without a deadline, a hardware failure could cause a test to wait forever.
-
-For example:
-
-```text
-ESP32 disconnected
-        │
-        ▼
-no response
-        │
-        ▼
-test waits forever
-```
-
-With a deadline:
-
-```text
-ESP32 disconnected
-        │
-        ▼
-no response
-        │
-        ▼
-2-second deadline reached
-        │
-        ▼
-test returns
-        │
-        ▼
-assertion fails
-```
-
-A test failure is much better than a test system that hangs indefinitely.
-
----
-
-# 34. Test 1 — Connectivity
-
-The first test is:
-
-```python
-def test_ping(uart):
-```
-
-It sends:
-
-```text
-PING
-```
-
-and verifies:
-
-```text
-CMD: PING
-PONG
-```
-
-This validates basic host-to-DUT communication and command handling.
-
----
-
-# 35. Test 2 — Device Information
-
-The second test sends:
-
-```text
-GET_INFO
-```
-
-and expects:
-
-```text
-MODEL=ESP32;FW=1.0.0
-```
-
-This verifies that the firmware exposes the expected identity/version information.
-
----
-
-# 36. Test 3 — Stateful Counter
-
-The test sends `GET_COUNTER` twice.
-
-It does **not** assert:
-
-```text
-first == 0
-second == 1
-```
-
-because previous manual commands may already have changed the device state.
-
-Instead it verifies:
-
-```python
-assert second_value == first_value + 1
-```
-
-This is a stronger test because it checks the actual behavioral requirement rather than assuming a particular initial state.
-
----
-
-# 37. Test 4 — Invalid Input
-
-The test sends:
-
-```text
-HELLO
-```
-
-which is deliberately unsupported.
-
-The expected response is:
-
-```text
-ERROR=UNKNOWN_COMMAND
-```
-
-This is a negative test.
-
-Testing invalid input is important because validation is not only about proving that valid operations work.
-
-It also checks that invalid operations fail predictably.
-
----
-
-# 38. Running the Firmware
-
-Open an ESP-IDF terminal and enter the lab directory:
+Activate an ESP-IDF-enabled PowerShell terminal, then navigate to the **lab project directory**:
 
 ```powershell
 cd C:\Users\babar\esp32-hardware-interface-labs\uart\lab01_uart_loopback
-```
-
-Build:
-
-```powershell
 idf.py build
 ```
 
-Flash:
+Do not run `idf.py build` from the repository root or `uart/` parent directory; the ESP-IDF project `CMakeLists.txt` is inside the lab directory.
+
+When the ESP32 is connected and its port is available:
 
 ```powershell
 idf.py -p COM3 flash
-```
-
-Monitor:
-
-```powershell
 idf.py -p COM3 monitor
 ```
 
-The firmware should report:
+Exit the ESP-IDF monitor with **Ctrl+]**. Close other serial monitors before running the Python host client or pytest; two programs normally cannot open the same Windows COM port simultaneously.
 
-```text
-UART Lab 01 ready
-```
-
-Exit the monitor with:
-
-```text
-Ctrl + ]
-```
-
-The monitor must be closed before the Python programs open COM3.
-
----
-
-# 39. Python Environment
-
-The host tools use the repository's Python virtual environment.
-
-From the repository root:
+For a combined flash-and-monitor command:
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
+idf.py -p COM3 flash monitor
 ```
 
-The prompt should show:
+These are commands to run, **not claims that the current revision has been flashed or tested**.
 
-```text
-(.venv)
-```
+## 15. What each validation level proves
 
-The required packages include:
+| Level | Evidence | What it proves | What it does not prove |
+|---|---|---|---|
+| Build | `idf.py build` succeeds | Firmware compiles and links | The board executes it correctly |
+| Flash/boot | Serial monitor shows application startup | Firmware runs on the target | All commands behave correctly |
+| Manual protocol test | Python receives expected responses | Selected end-to-end commands work | All boundary cases work |
+| Automated HIL test | pytest passes against ESP32 | Tested requirements behave as asserted | Complete coverage or signal integrity |
+| Electrical inspection | Logic analyzer or oscilloscope | Observable timing/voltage properties | Higher-level correctness by itself |
 
-```text
-pytest
-pyserial
-```
+Earlier UART hardware tests may have passed on a prior revision. After refactoring, rerun the host tests to confirm the modular firmware still produces the same observable behavior.
 
-They can be verified with:
+## 16. Troubleshooting
 
-```powershell
-python -m pytest --version
-python -c "import serial; print(serial.__version__)"
-```
+| Symptom | Likely cause | Check |
+|---|---|---|
+| `CMakeLists.txt not found` | Wrong working directory | Enter `uart/lab01_uart_loopback` |
+| COM3 cannot be opened | Wrong port, disconnected board, or port in use | Device Manager; close serial monitor |
+| No response | Wrong baud rate, missing newline, or firmware not running | Use 115200 8N1; append `\n`; inspect boot logs |
+| Unexpected `CMD:` or boot text | UART0 shares console and command traffic | Filter debug/log lines in the host client |
+| Command appears split | Line framing or timeout behavior | Verify newline termination |
+| `ERROR=COMMAND_TOO_LONG` | More than 127 command characters | Shorten input or deliberately test overflow handling |
+| Counter differs from expectation | Earlier requests or board reset | Track requests within the current boot session |
+| pytest serial-port error | Monitor and pytest compete for COM3 | Close monitor before testing |
 
----
+## 17. Design choices and trade-offs
 
-# 40. Manual Validation
+**Why three firmware modules?** The application stays readable; UART configuration is isolated; command behavior can be understood independently of hardware setup.
 
-Run:
+**Why read one byte at a time?** It simplifies teaching line framing and overflow recovery. It is not necessarily the most efficient approach for high-throughput serial links.
 
-```powershell
-python host\uart_client.py
-```
+**Why fixed-size buffers?** They make memory usage predictable and avoid dynamic allocation for short command messages. Their limits must be checked explicitly.
 
-A successful session looks similar to:
+**Why `esp_err_t`?** It distinguishes successful operations from invalid state, invalid arguments, oversized input, and driver failures.
 
-```text
-Opening COM3 at 115200 baud...
+**Why keep UART0?** It uses the development board's existing USB-to-serial path, but console output can mix with protocol traffic. A separate UART would be an alternative for a more isolated production protocol.
 
-TX -> PING
-RX <- CMD: PING
-RX <- PONG
+**Why preserve the `CMD:` line?** Existing host-side tests synchronize on it. Removing or changing it without updating the host tests could break the validation workflow even if the command responses remain correct.
 
-TX -> GET_INFO
-RX <- CMD: GET_INFO
-RX <- MODEL=ESP32;FW=1.0.0
+## 18. Suggested exercises
 
-TX -> GET_COUNTER
-RX <- CMD: GET_COUNTER
-RX <- COUNTER=2
+1. Trace `PING` from Python through UART0, `uart_bus_read_line()`, `protocol_process_command()`, and `uart_bus_write_line()`.
+2. Explain why a newline is required and why `\r` is ignored.
+3. Send an unknown command and identify which module generates the error.
+4. Send a command longer than 127 characters and confirm the next valid command is still parsed correctly.
+5. Request `GET_COUNTER` several times, then reset the board and observe the counter behavior.
+6. Run the host tests after flashing the refactored firmware and record the actual results.
+7. Explain the difference between a successful ESP-IDF build and a passing hardware-in-the-loop test.
 
-TX -> GET_COUNTER
-RX <- CMD: GET_COUNTER
-RX <- COUNTER=3
+## 19. Key takeaways
 
-TX -> HELLO
-RX <- CMD: HELLO
-RX <- ERROR=UNKNOWN_COMMAND
-```
-
-The actual counter starting value may differ.
-
-The important property is that consecutive values increment by one.
-
----
-
-# 41. Automated HIL Validation
-
-Run:
-
-```powershell
-python -m pytest tests\test_uart_protocol.py -v
-```
-
-The validated result for this lab is:
-
-```text
-test_ping              PASSED
-test_get_info          PASSED
-test_counter           PASSED
-test_unknown_command   PASSED
-
-4 passed
-```
-
-This demonstrates that the complete host-to-hardware validation path works.
-
----
-
-# 42. Important Debugging Lessons
-
-Several practical embedded-development lessons emerge from this lab.
-
-## Correct UART Peripheral
-
-The host communicates through the development board's USB serial connection.
-
-Therefore this implementation uses:
-
-```c
-UART_NUM_0
-```
-
-Using a different UART peripheral such as UART2 would require wiring its TX/RX pins to an appropriate external interface.
-
-## Serial Port Ownership
-
-Only one application can normally own COM3 at a time.
-
-Therefore:
-
-```text
-ESP-IDF monitor
-```
-
-must be closed before:
-
-```text
-uart_client.py
-```
-
-or:
-
-```text
-pytest
-```
-
-tries to open the port.
-
-## Firmware and Host Must Agree
-
-Both sides must agree on:
-
-```text
-baud rate
-message framing
-command names
-response format
-```
-
-A communication interface is effectively a contract between the host and DUT.
-
-## Boot Output Can Interfere with Tests
-
-ESP32 boot messages share the serial connection.
-
-The host therefore waits for boot completion and clears stale input before testing.
-
-## Hardware Tests Need Timeouts
-
-Physical hardware can disconnect, reset, stall, or fail.
-
-Automated HIL tests must therefore avoid infinite waits.
-
----
-
-# 43. Design Choices
-
-This lab deliberately uses a simple design.
-
-### Text Protocol
-
-Commands such as:
-
-```text
-PING
-GET_INFO
-GET_COUNTER
-```
-
-are human-readable.
-
-This makes debugging easy with a terminal or Python script.
-
-A production protocol might instead use binary packets for efficiency.
-
-### Newline Framing
-
-Newline framing is simple and easy to inspect.
-
-More advanced protocols might use:
-
-```text
-packet length
-start/end markers
-checksums
-CRC
-sequence numbers
-```
-
-### Byte-at-a-Time Parsing
-
-The firmware reads one byte at a time.
-
-This emphasizes how a serial stream becomes an application message.
-
-A higher-performance implementation might process blocks of received data.
-
-### Diagnostic Echo
-
-The:
-
-```text
-CMD: ...
-```
-
-line provides a convenient synchronization point for the HIL test.
-
-In a larger production system, diagnostic logging and machine-readable protocol traffic might be separated more strictly.
-
----
-
-# 44. What This Lab Demonstrates Professionally
-
-Although the project is small, it demonstrates several concepts relevant to embedded validation engineering:
-
-```text
-Embedded firmware
-      +
-UART peripheral configuration
-      +
-serial protocol design
-      +
-host-side automation
-      +
-Python tooling
-      +
-pytest
-      +
-physical DUT
-      =
-small HIL validation system
-```
-
-The key point is that the test software is not merely testing Python code.
-
-It is controlling and verifying behavior implemented on a physical embedded target.
-
----
-
-# 45. Relationship to the Other Interface Labs
-
-UART Lab 01 establishes the host/DUT validation pattern.
-
-The later labs extend hardware-interface knowledge:
-
-```text
-Lab 01 — UART
-    │
-    ├── serial communication
-    ├── command protocol
-    └── host/HIL validation
-          │
-          ▼
-Lab 02 — I²C
-    │
-    ├── master bus
-    ├── device addresses
-    ├── ACK/probing
-    └── sensor communication
-          │
-          ▼
-Lab 03 — SPI
-    │
-    ├── clocked full-duplex bus
-    ├── chip select
-    └── MCP3008 ADC
-          │
-          ▼
-Lab 04 — CAN/TWAI
-    │
-    ├── message-oriented bus
-    ├── arbitration
-    └── external transceiver
-```
-
-Together, these labs build experience with common embedded hardware interfaces rather than treating each peripheral as an isolated API exercise.
-
----
-
-# 46. Key Takeaways
-
-The most important concepts from UART Lab 01 are:
-
-1. UART transfers a serial stream of bytes.
-2. UART0 provides the PC communication path used in this lab.
-3. The application protocol gives those bytes meaning.
-4. Newline characters provide message framing.
-5. C strings require explicit null termination.
-6. Buffer boundaries must be protected.
-7. Host and firmware must agree on protocol behavior.
-8. Serial tests need synchronization.
-9. Hardware tests need bounded timeouts.
-10. pytest can validate a physical embedded DUT through PySerial.
-11. Stateful behavior should be tested through invariants rather than fragile assumptions about initial state.
-12. Separating firmware, host tooling, and tests makes the project easier to maintain and extend.
-
-The resulting architecture is:
-
-```text
-                    UART LAB 01
-
-              ┌───────────────────┐
-              │      pytest       │
-              │  HIL assertions   │
-              └─────────┬─────────┘
-                        │
-              ┌─────────▼─────────┐
-              │     PySerial      │
-              │ host communication│
-              └─────────┬─────────┘
-                        │
-                      COM3
-                        │
-              ┌─────────▼─────────┐
-              │   USB-to-Serial   │
-              └─────────┬─────────┘
-                        │
-                      UART0
-                        │
-              ┌─────────▼─────────┐
-              │       ESP32       │
-              │     Firmware      │
-              ├───────────────────┤
-              │ UART RX           │
-              │ Command framing   │
-              │ Command parser    │
-              │ Response handling │
-              └───────────────────┘
-```
-
-This is the foundation for progressively more sophisticated embedded hardware and validation work in the remaining labs.
+The UART lab demonstrates a complete, small embedded communication path: **physical serial transport → line framing → command processing → response transmission → host-side verification**. The modular design keeps hardware-specific code in `uart_bus.c`, command semantics in `protocol.c`, and application flow in `main.c`. It also shows why test evidence must be associated with the exact firmware revision and hardware setup being validated.
