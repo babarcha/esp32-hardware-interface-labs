@@ -1,0 +1,32 @@
+name: SPI native unit tests
+
+on:
+  push:
+    paths:
+      - 'spi/lab03_spi_master/main/spi_bus.c'
+      - 'spi/lab03_spi_master/main/spi_bus.h'
+      - 'spi/lab03_spi_master/tests/native/**'
+      - '.github/workflows/spi-native-tests.yml'
+  pull_request:
+    paths:
+      - 'spi/lab03_spi_master/main/spi_bus.c'
+      - 'spi/lab03_spi_master/main/spi_bus.h'
+      - 'spi/lab03_spi_master/tests/native/**'
+      - '.github/workflows/spi-native-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  native-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile production SPI bus with mock ESP-IDF driver
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -I spi/lab03_spi_master/tests/native/mocks \
+            -I spi/lab03_spi_master/main \
+            spi/lab03_spi_master/main/spi_bus.c \
+            spi/lab03_spi_master/tests/native/test_spi_bus.c \
+            -o /tmp/spi_native_tests
+      - name: Run SPI native unit tests
+        run: /tmp/spi_native_tests
