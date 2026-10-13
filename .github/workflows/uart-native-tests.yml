@@ -1,0 +1,31 @@
+name: UART native unit tests
+
+on:
+  push:
+    paths:
+      - 'uart/lab01_uart_loopback/main/protocol.c'
+      - 'uart/lab01_uart_loopback/main/protocol.h'
+      - 'uart/lab01_uart_loopback/tests/native/**'
+      - '.github/workflows/uart-native-tests.yml'
+  pull_request:
+    paths:
+      - 'uart/lab01_uart_loopback/main/protocol.c'
+      - 'uart/lab01_uart_loopback/main/protocol.h'
+      - 'uart/lab01_uart_loopback/tests/native/**'
+      - '.github/workflows/uart-native-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  native-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build native UART protocol tests
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -I uart/lab01_uart_loopback/main \
+            uart/lab01_uart_loopback/main/protocol.c \
+            uart/lab01_uart_loopback/tests/native/test_protocol.c \
+            -o /tmp/uart_protocol_tests
+      - name: Run native tests
+        run: /tmp/uart_protocol_tests
