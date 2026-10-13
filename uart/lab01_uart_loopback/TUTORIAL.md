@@ -1,8 +1,8 @@
 # UART Lab 01 — ESP32 UART Command/Response and Hardware-in-the-Loop Testing
 
-**Repository:** `esp32-hardware-interface-labs`  
-**Lab:** `uart/lab01_uart_loopback`  
-**Platform:** ESP32, ESP-IDF v5.5.5, Windows 11, Python  
+**Repository:** `esp32-hardware-interface-labs`
+**Lab:** `uart/lab01_uart_loopback`
+**Platform:** ESP32, ESP-IDF v5.5.5, Windows 11, Python
 **Status:** Modular firmware and host-side validation implemented; rerun hardware tests after firmware changes.
 
 ## 1. Purpose and learning objectives
