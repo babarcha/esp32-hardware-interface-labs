@@ -88,11 +88,17 @@ void app_main(void)
 
     if (result != ESP_OK)
     {
-        printf(
-            "FATAL: start failed: %s\n",
-            esp_err_to_name(result));
+        printf("FATAL: start failed: %s\n",
+               esp_err_to_name(result));
 
-        twai_bus_deinit();
+        esp_err_t cleanup_result = twai_bus_deinit();
+
+        if (cleanup_result != ESP_OK)
+        {
+            printf("TWAI cleanup failed: %s\n",
+                   esp_err_to_name(cleanup_result));
+        }
+
         return;
     }
 
