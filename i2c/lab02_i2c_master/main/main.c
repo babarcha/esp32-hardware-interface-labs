@@ -3,16 +3,18 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 #include "i2c_bus.h"
 #include "bme280.h"
 
 void app_main(void)
 {
     printf("\n");
-    printf("I2C Lab 02 - Pass 6: Sensor Identification\n");
-    printf("------------------------------------------\n");
+    printf("I2C Lab 02 - Pass 7: BMP280 Measurements\n");
+    printf("----------------------------------------\n");
 
-    // Step 1: Initialize the I2C controller.
     esp_err_t err = i2c_bus_init();
 
     if (err != ESP_OK)
@@ -22,11 +24,10 @@ void app_main(void)
         return;
     }
 
-    printf("I2C controller initialized successfully\n");
+    printf("I2C controller initialized\n");
     printf("SDA = GPIO%d\n", I2C_MASTER_SDA_IO);
     printf("SCL = GPIO%d\n", I2C_MASTER_SCL_IO);
 
-    // Step 2: Scan the bus for connected devices.
     int devices_found = 0;
 
     err = i2c_bus_scan(&devices_found);
@@ -38,45 +39,26 @@ void app_main(void)
         goto cleanup;
     }
 
-    printf("\nApplication: %d I2C device(s) detected\n",
-           devices_found);
-
-    if (devices_found == 0)
-    {
-        printf("No I2C devices detected.\n");
-        goto cleanup;
-    }
-
-    // Step 3: Find the BMP280/BME280 address.
-    uint8_t sensor_addr = 0;
+    uint8_t address = 0;
 
     if (i2c_bus_probe(BME280_I2C_ADDR_LOW) == ESP_OK)
     {
-        sensor_addr = BME280_I2C_ADDR_LOW;
+        address = BME280_I2C_ADDR_LOW;
     }
     else if (i2c_bus_probe(BME280_I2C_ADDR_HIGH) == ESP_OK)
     {
-        sensor_addr = BME280_I2C_ADDR_HIGH;
+        address = BME280_I2C_ADDR_HIGH;
     }
 
-    if (sensor_addr == 0)
+    if (address == 0)
     {
-        printf("BMP280/BME280 not found at 0x76 or 0x77\n");
+        printf("BMP280 not detected\n");
         goto cleanup;
     }
 
-    printf("\nSensor responding at address: 0x%02X\n",
-           sensor_addr);
-
-    // Step 4: Read the sensor identification register.
     uint8_t chip_id = 0;
 
-    printf("\nReading sensor chip ID...\n");
-    printf("Register: 0x%02X\n", BME280_REG_CHIP_ID);
-
-    err = bme280_read_chip_id(
-        sensor_addr,
-        &chip_id);
+    err = bme280_read_chip_id(address, &chip_id);
 
     if (err != ESP_OK)
     {
@@ -85,26 +67,55 @@ void app_main(void)
         goto cleanup;
     }
 
+    printf("\nSensor address: 0x%02X\n", address);
     printf("Chip ID: 0x%02X\n", chip_id);
+    printf("Sensor: %s\n",
+           bme280_sensor_name(
+               bme280_get_sensor_type(chip_id)));
 
-    // Step 5: Identify the sensor.
-    sensor_type_t sensor_type =
-        bme280_get_sensor_type(chip_id);
+    bmp280_t sensor;
 
-    printf("Sensor detected: %s\n",
-           bme280_sensor_name(sensor_type));
+    err = bmp280_init(&sensor, address);
 
-    if (sensor_type == SENSOR_UNKNOWN)
+    if (err != ESP_OK)
     {
-        printf("WARNING: Unexpected chip ID.\n");
+        printf("BMP280 initialization failed: %s\n",
+               esp_err_to_name(err));
+        goto cleanup;
     }
-    else
+
+    printf("BMP280 calibration loaded\n");
+    printf("BMP280 configured in normal mode\n");
+    printf("\nStarting measurements...\n");
+
+    // The first normal-mode conversion needs time to complete.
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    while (1)
     {
-        printf("Sensor identification successful!\n");
+        bmp280_measurement_t measurement;
+
+        err = bmp280_read_measurement(
+            &sensor,
+            &measurement);
+
+        if (err == ESP_OK)
+        {
+            printf("Temperature: %.2f C | "
+                   "Pressure: %.2f hPa\n",
+                   measurement.temperature_c,
+                   measurement.pressure_hpa);
+        }
+        else
+        {
+            printf("Measurement failed: %s\n",
+                   esp_err_to_name(err));
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(2000));
     }
 
 cleanup:
-    // Step 6: Release the I2C controller.
     err = i2c_bus_deinit();
 
     if (err != ESP_OK)
@@ -112,10 +123,4 @@ cleanup:
         printf("I2C cleanup failed: %s\n",
                esp_err_to_name(err));
     }
-    else
-    {
-        printf("\nI2C bus released successfully\n");
-    }
-
-    printf("\nPass 6 execution complete.\n");
 }

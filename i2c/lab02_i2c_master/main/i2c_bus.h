@@ -12,9 +12,7 @@
 #define I2C_MASTER_TIMEOUT_MS 1000
 
 esp_err_t i2c_bus_init(void);
-
 esp_err_t i2c_bus_probe(uint8_t address);
-
 esp_err_t i2c_bus_scan(int *devices_found);
 
 esp_err_t i2c_bus_read_register(
@@ -22,6 +20,11 @@ esp_err_t i2c_bus_read_register(
     uint8_t reg_addr,
     uint8_t *data,
     size_t len);
+
+esp_err_t i2c_bus_write_register(
+    uint8_t device_addr,
+    uint8_t reg_addr,
+    uint8_t value);
 
 esp_err_t i2c_bus_deinit(void);
 
