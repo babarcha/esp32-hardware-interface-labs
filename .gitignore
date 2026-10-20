@@ -25,3 +25,8 @@ compile_commands.json
 Thumbs.db
 Desktop.ini
 **/build-native/
+
+.venv-hil/
+**/__pycache__/
+**/.pytest_cache/
+**/build-native/
