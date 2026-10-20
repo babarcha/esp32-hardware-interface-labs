@@ -1,4 +1,3 @@
-
 #include <stdio.h>
 #include <stdint.h>
 
@@ -8,11 +7,12 @@
 
 #include "i2c_bus.h"
 #include "bme280.h"
+#include "hil_protocol.h"
 
 void app_main(void)
 {
     printf("\n");
-    printf("I2C Lab 02 - Pass 7: BMP280 Measurements\n");
+    printf("I2C Lab 02 - Pass 9: BMP280 HIL Validation\n");
     printf("----------------------------------------\n");
 
     esp_err_t err = i2c_bus_init();
@@ -36,7 +36,6 @@ void app_main(void)
     {
         printf("I2C scan failed: %s\n",
                esp_err_to_name(err));
-        goto cleanup;
     }
 
     uint8_t address = 0;
@@ -45,82 +44,53 @@ void app_main(void)
     {
         address = BME280_I2C_ADDR_LOW;
     }
-    else if (i2c_bus_probe(BME280_I2C_ADDR_HIGH) == ESP_OK)
+    else if (
+        i2c_bus_probe(BME280_I2C_ADDR_HIGH) == ESP_OK)
     {
         address = BME280_I2C_ADDR_HIGH;
     }
 
+    bmp280_t sensor = {0};
+    bmp280_t *active_sensor = NULL;
+
     if (address == 0)
     {
         printf("BMP280 not detected\n");
-        goto cleanup;
     }
-
-    uint8_t chip_id = 0;
-
-    err = bme280_read_chip_id(address, &chip_id);
-
-    if (err != ESP_OK)
+    else
     {
-        printf("Chip ID read failed: %s\n",
-               esp_err_to_name(err));
-        goto cleanup;
-    }
+        printf("Sensor address: 0x%02X\n", address);
 
-    printf("\nSensor address: 0x%02X\n", address);
-    printf("Chip ID: 0x%02X\n", chip_id);
-    printf("Sensor: %s\n",
-           bme280_sensor_name(
-               bme280_get_sensor_type(chip_id)));
-
-    bmp280_t sensor;
-
-    err = bmp280_init(&sensor, address);
-
-    if (err != ESP_OK)
-    {
-        printf("BMP280 initialization failed: %s\n",
-               esp_err_to_name(err));
-        goto cleanup;
-    }
-
-    printf("BMP280 calibration loaded\n");
-    printf("BMP280 configured in normal mode\n");
-    printf("\nStarting measurements...\n");
-
-    // The first normal-mode conversion needs time to complete.
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    while (1)
-    {
-        bmp280_measurement_t measurement;
-
-        err = bmp280_read_measurement(
-            &sensor,
-            &measurement);
+        err = bmp280_init(&sensor, address);
 
         if (err == ESP_OK)
         {
-            printf("Temperature: %.2f C | "
-                   "Pressure: %.2f hPa\n",
-                   measurement.temperature_c,
-                   measurement.pressure_hpa);
+            active_sensor = &sensor;
+
+            printf("BMP280 initialized\n");
+
+            // Allow the first measurement to complete.
+            vTaskDelay(pdMS_TO_TICKS(100));
         }
         else
         {
-            printf("Measurement failed: %s\n",
+            printf("BMP280 initialization failed: %s\n",
                    esp_err_to_name(err));
         }
-
-        vTaskDelay(pdMS_TO_TICKS(2000));
     }
 
-cleanup:
-    err = i2c_bus_deinit();
+    err = hil_protocol_init();
 
     if (err != ESP_OK)
     {
-        printf("I2C cleanup failed: %s\n",
+        printf("HIL UART initialization failed: %s\n",
                esp_err_to_name(err));
+        i2c_bus_deinit();
+        return;
     }
+
+    printf("HIL protocol initialized\n");
+
+    // The command loop does not normally return.
+    hil_protocol_run(active_sensor);
 }
