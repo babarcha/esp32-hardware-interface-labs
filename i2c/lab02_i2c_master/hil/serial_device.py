@@ -1,3 +1,4 @@
+
 import time
 from dataclasses import dataclass
 
@@ -42,8 +43,8 @@ class SerialDevice:
             write_timeout=self.timeout,
         )
 
-        # ESP32 may reset when the serial port opens.
-        time.sleep(2)
+        # Opening the USB serial port may reset the ESP32.
+        time.sleep(2.0)
 
         self.connection.reset_input_buffer()
         return self
@@ -66,7 +67,6 @@ class SerialDevice:
         if "\r" in command or "\n" in command:
             raise ValueError("Command must not contain newlines")
 
-        # Remove stale input before sending a new command.
         self.connection.reset_input_buffer()
 
         try:
@@ -94,7 +94,7 @@ class SerialDevice:
                 "utf-8", errors="replace"
             ).strip()
 
-            # Ignore ESP-IDF startup logs.
+            # Ignore ESP-IDF boot messages.
             if not line.startswith("HIL:"):
                 continue
 
@@ -140,6 +140,19 @@ class SerialDevice:
             raise DeviceProtocolError(
                 f"Invalid measurement: {response}"
             ) from exc
+
+    def reinit_sensor(self) -> bool:
+        response = self.send_command("REINIT_SENSOR")
+
+        if response == "SENSOR_REINIT=OK":
+            return True
+
+        if response == "ERROR=SENSOR_REINIT_FAILED":
+            return False
+
+        raise DeviceProtocolError(
+            f"Unexpected recovery response: {response}"
+        )
 
     @staticmethod
     def _parse_fields(response: str) -> dict:
