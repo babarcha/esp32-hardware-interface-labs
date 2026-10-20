@@ -24,3 +24,4 @@ compile_commands.json
 # Windows
 Thumbs.db
 Desktop.ini
+**/build-native/

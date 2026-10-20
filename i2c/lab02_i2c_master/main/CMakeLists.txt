@@ -4,6 +4,7 @@ idf_component_register(
         "main.c"
         "i2c_bus.c"
         "bme280.c"
+        "bmp280_compensation.c"
     INCLUDE_DIRS
         "."
     PRIV_REQUIRES

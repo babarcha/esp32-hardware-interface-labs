@@ -1,0 +1,36 @@
+name: BMP280 Native Tests
+
+on:
+  push:
+    paths:
+      - "i2c/lab02_i2c_master/main/**"
+      - "i2c/lab02_i2c_master/tests/**"
+      - ".github/workflows/bmp280-native-tests.yml"
+
+  pull_request:
+    paths:
+      - "i2c/lab02_i2c_master/main/**"
+      - "i2c/lab02_i2c_master/tests/**"
+      - ".github/workflows/bmp280-native-tests.yml"
+
+  workflow_dispatch:
+
+jobs:
+  native-tests:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure native tests
+        run: |
+          cmake -S i2c/lab02_i2c_master/tests \
+                -B build/bmp280-native \
+                -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build native tests
+        run: cmake --build build/bmp280-native
+
+      - name: Run native tests
+        run: ctest --test-dir build/bmp280-native --output-on-failure -V

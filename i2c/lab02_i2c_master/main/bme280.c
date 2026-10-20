@@ -171,84 +171,6 @@ esp_err_t bmp280_init(
     return ESP_OK;
 }
 
-static int32_t compensate_temperature(
-    bmp280_t *sensor,
-    int32_t adc_T)
-{
-    const bmp280_calibration_t *c =
-        &sensor->calibration;
-
-    int32_t var1 =
-        ((((adc_T >> 3) -
-           ((int32_t)c->dig_T1 << 1))) *
-         (int32_t)c->dig_T2) >>
-        11;
-
-    int32_t var2 =
-        (((((adc_T >> 4) -
-            (int32_t)c->dig_T1) *
-           ((adc_T >> 4) -
-            (int32_t)c->dig_T1)) >>
-          12) *
-         (int32_t)c->dig_T3) >>
-        14;
-
-    sensor->t_fine = var1 + var2;
-
-    // Temperature in units of 0.01 degrees Celsius.
-    return (sensor->t_fine * 5 + 128) >> 8;
-}
-
-static uint32_t compensate_pressure(
-    bmp280_t *sensor,
-    int32_t adc_P)
-{
-    const bmp280_calibration_t *c =
-        &sensor->calibration;
-
-    int64_t var1 =
-        (int64_t)sensor->t_fine - 128000;
-
-    int64_t var2 = var1 * var1 *
-                   (int64_t)c->dig_P6;
-
-    var2 += (var1 * (int64_t)c->dig_P5) << 17;
-    var2 += ((int64_t)c->dig_P4) << 35;
-
-    var1 =
-        ((var1 * var1 * (int64_t)c->dig_P3) >> 8) +
-        ((var1 * (int64_t)c->dig_P2) << 12);
-
-    var1 =
-        (((((int64_t)1 << 47) + var1) *
-          (int64_t)c->dig_P1) >>
-         33);
-
-    if (var1 == 0)
-    {
-        return 0;
-    }
-
-    int64_t p = 1048576 - adc_P;
-
-    p = (((p << 31) - var2) * 3125) / var1;
-
-    var1 =
-        ((int64_t)c->dig_P9 * (p >> 13) *
-         (p >> 13)) >>
-        25;
-
-    var2 =
-        ((int64_t)c->dig_P8 * p) >> 19;
-
-    p =
-        ((p + var1 + var2) >> 8) +
-        (((int64_t)c->dig_P7) << 4);
-
-    // Pressure in Q24.8 Pa.
-    return (uint32_t)p;
-}
-
 esp_err_t bmp280_read_measurement(
     bmp280_t *sensor,
     bmp280_measurement_t *measurement)
@@ -294,11 +216,16 @@ esp_err_t bmp280_read_measurement(
 
     // Temperature must be compensated first to calculate t_fine.
     int32_t temperature_100 =
-        compensate_temperature(sensor, adc_T);
+        bmp280_compensate_temperature(
+            &sensor->calibration,
+            &sensor->compensation,
+            adc_T);
 
     uint32_t pressure_q24_8 =
-        compensate_pressure(sensor, adc_P);
-
+        bmp280_compensate_pressure(
+            &sensor->calibration,
+            &sensor->compensation,
+            adc_P);
     if (pressure_q24_8 == 0)
     {
         return ESP_ERR_INVALID_RESPONSE;
