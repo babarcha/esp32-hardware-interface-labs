@@ -33,3 +33,13 @@ def device(request):
         timeout=3.0,
     ) as connected_device:
         yield connected_device
+
+
+def pytest_collection_modifyitems(items):
+    """
+    Automatically mark tests as hardware tests unless
+    they are explicitly marked as simulation tests.
+    """
+    for item in items:
+        if item.get_closest_marker("simulation") is None:
+            item.add_marker(pytest.mark.hardware)

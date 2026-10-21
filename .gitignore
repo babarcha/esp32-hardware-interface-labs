@@ -30,3 +30,5 @@ Desktop.ini
 **/__pycache__/
 **/.pytest_cache/
 **/build-native/
+
+i2c/lab02_i2c_master/hil/reports/

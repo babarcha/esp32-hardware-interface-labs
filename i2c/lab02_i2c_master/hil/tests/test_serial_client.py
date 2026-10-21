@@ -1,10 +1,10 @@
-import pytest
-
 from serial_device import (
     SerialDevice,
     DeviceTimeoutError,
     DeviceProtocolError,
 )
+import pytest
+pytestmark = pytest.mark.simulation
 
 
 class FakeSerial:
