@@ -1,11 +1,10 @@
 
 """
-BMP280 HIL — Pass 9.10
+BMP280 HIL — Pass 9.11.2
 
-Combine requirements traceability with pytest JUnit XML
-execution results to produce verification evidence.
+Generate requirements verification evidence from pytest JUnit XML.
 
-Statuses:
+Verification statuses:
     UNMAPPED
     NOT_EXECUTED
     PASSED
@@ -17,6 +16,7 @@ import csv
 import json
 import sys
 import xml.etree.ElementTree as ET
+
 from collections import defaultdict
 from pathlib import Path
 
@@ -36,6 +36,8 @@ OUTPUT_JSON = REPORTS / "verification-evidence.json"
 
 
 def read_traceability():
+    """Read the requirements-to-tests mapping."""
+
     if not TRACEABILITY.exists():
         raise FileNotFoundError(
             "Traceability report missing. Run "
@@ -43,7 +45,8 @@ def read_traceability():
         )
 
     with TRACEABILITY.open(
-        encoding="utf-8-sig", newline=""
+        encoding="utf-8-sig",
+        newline="",
     ) as file:
         return list(csv.DictReader(file))
 
@@ -53,56 +56,120 @@ def normalize_test_id(classname, name):
     Convert pytest JUnit identifiers into pytest node IDs.
 
     Example:
-        classname = tests.test_connectivity
-        name = test_ping
+        tests.test_connectivity, test_ping
 
     Result:
         tests/test_connectivity.py::test_ping
     """
+
+    if not classname or not name:
+        raise ValueError(
+            "JUnit testcase must contain classname and name"
+        )
+
     module_path = classname.replace(".", "/")
     return f"{module_path}.py::{name}"
 
 
+def parse_junit_file(junit_file):
+    """
+    Parse one JUnit XML file.
+
+    Return:
+        dict mapping pytest node IDs to execution records.
+
+    Raises:
+        ValueError for malformed XML, unsupported root elements,
+        or missing testcase identifiers.
+    """
+
+    junit_file = Path(junit_file)
+
+    try:
+        tree = ET.parse(junit_file)
+    except ET.ParseError as exc:
+        raise ValueError(
+            f"Malformed JUnit XML: {junit_file}"
+        ) from exc
+
+    root = tree.getroot()
+
+    if root.tag not in ("testsuite", "testsuites"):
+        raise ValueError(
+            f"Unsupported JUnit root element "
+            f"'{root.tag}' in {junit_file}"
+        )
+
+    results = defaultdict(list)
+
+    for testcase in root.iter("testcase"):
+        classname = testcase.get("classname", "")
+        name = testcase.get("name", "")
+
+        if not classname or not name:
+            raise ValueError(
+                f"JUnit testcase missing classname or name "
+                f"in {junit_file}"
+            )
+
+        test_id = normalize_test_id(classname, name)
+
+        if testcase.find("failure") is not None:
+            status = "FAILED"
+        elif testcase.find("error") is not None:
+            status = "FAILED"
+        elif testcase.find("skipped") is not None:
+            status = "SKIPPED"
+        else:
+            status = "PASSED"
+
+        results[test_id].append({
+            "status": status,
+            "source": junit_file.name,
+        })
+
+    return results
+
+
 def read_junit_results():
+    """
+    Combine execution records from configured JUnit reports.
+
+    Missing reports are warned about. Requirements without
+    execution records cannot be marked PASSED.
+    """
+
     results = defaultdict(list)
 
     for junit_file in JUNIT_FILES:
         if not junit_file.exists():
             print(
-                f"WARNING: Missing execution report: "
+                "WARNING: Missing execution report: "
                 f"{junit_file.name}"
             )
             continue
 
-        tree = ET.parse(junit_file)
+        parsed = parse_junit_file(junit_file)
 
-        for testcase in tree.iter("testcase"):
-            classname = testcase.get("classname", "")
-            name = testcase.get("name", "")
-
-            if not classname or not name:
-                continue
-
-            test_id = normalize_test_id(classname, name)
-
-            if testcase.find("failure") is not None:
-                status = "FAILED"
-            elif testcase.find("error") is not None:
-                status = "FAILED"
-            elif testcase.find("skipped") is not None:
-                status = "SKIPPED"
-            else:
-                status = "PASSED"
-
-            results[test_id].append({
-                "status": status,
-                "source": junit_file.name,
-            })
+        for test_id, executions in parsed.items():
+            results[test_id].extend(executions)
 
     return results
 
 
 def requirement_status(tests, results):
+    """
+    Determine requirement verification status.
+
+    Rules:
+        No mapped tests -> UNMAPPED
+        No executions -> NOT_EXECUTED
+        Any failure -> FAILED
+        Duplicate executions -> INCOMPLETE
+        Skipped execution -> INCOMPLETE
+        All mapped tests passed exactly once -> PASSED
+    """
+
     if not tests:
         return "UNMAPPED"
 
@@ -116,16 +183,19 @@ def requirement_status(tests, results):
             continue
 
         execution_statuses = [
-            item["status"] for item in executions
+            item["status"]
+            for item in executions
         ]
 
         if "FAILED" in execution_statuses:
             statuses.append("FAILED")
-        elif all(
-            status == "PASSED"
-            for status in execution_statuses
-        ):
+
+        elif len(executions) > 1:
+            statuses.append("INCOMPLETE")
+
+        elif execution_statuses == ["PASSED"]:
             statuses.append("PASSED")
+
         else:
             statuses.append("INCOMPLETE")
 
@@ -145,6 +215,8 @@ def requirement_status(tests, results):
 
 
 def generate_evidence():
+    """Generate requirements verification CSV and JSON reports."""
+
     traceability = read_traceability()
     results = read_junit_results()
 
@@ -177,11 +249,16 @@ def generate_evidence():
         "tests",
     ]
 
+    REPORTS.mkdir(parents=True, exist_ok=True)
+
     with OUTPUT_CSV.open(
-        "w", encoding="utf-8", newline=""
+        "w",
+        encoding="utf-8",
+        newline="",
     ) as file:
         writer = csv.DictWriter(
-            file, fieldnames=fieldnames
+            file,
+            fieldnames=fieldnames,
         )
         writer.writeheader()
         writer.writerows(rows)
@@ -205,15 +282,17 @@ def generate_evidence():
     summary = {
         "total_requirements": total,
         "verified_requirements": counts["PASSED"],
-        "verification_percent": round(
-            100 * counts["PASSED"] / total, 2
-        ) if total else 0.0,
+        "verification_percent": (
+            round(100 * counts["PASSED"] / total, 2)
+            if total else 0.0
+        ),
         "status_counts": counts,
         "requirements": rows,
     }
 
     with OUTPUT_JSON.open(
-        "w", encoding="utf-8"
+        "w",
+        encoding="utf-8",
     ) as file:
         json.dump(summary, file, indent=2)
 
@@ -227,17 +306,17 @@ def main():
     print("---------------------------")
 
     print(
-        f"Total requirements: "
+        "Total requirements: "
         f"{summary['total_requirements']}"
     )
 
     print(
-        f"Verified requirements: "
+        "Verified requirements: "
         f"{summary['verified_requirements']}"
     )
 
     print(
-        f"Verification coverage: "
+        "Verification coverage: "
         f"{summary['verification_percent']}%"
     )
 
@@ -250,7 +329,10 @@ def main():
     print(f"  {OUTPUT_CSV}")
     print(f"  {OUTPUT_JSON}")
 
-    if summary["verified_requirements"] != summary["total_requirements"]:
+    if (
+        summary["verified_requirements"]
+        != summary["total_requirements"]
+    ):
         sys.exit(1)
 
 

@@ -1,0 +1,121 @@
+
+name: BMP280 HIL Python CI
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+    paths:
+      - "i2c/lab02_i2c_master/hil/**"
+      - ".github/workflows/bmp280-hil-ci.yml"
+
+  pull_request:
+    paths:
+      - "i2c/lab02_i2c_master/hil/**"
+      - ".github/workflows/bmp280-hil-ci.yml"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+    working-directory: i2c/lab02_i2c_master/hil
+
+jobs:
+
+  python-tests:
+    name: Simulation and Verification Unit Tests
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest pytest-html pyserial
+
+      - name: Validate Python syntax
+        run: |
+          python -m compileall -q tools tests
+
+      - name: Run simulation tests
+        run: |
+          mkdir -p reports
+          python -m pytest \
+            -c pytest.ini \
+            -v \
+            -m simulation \
+            tests \
+            --junitxml=reports/ci-simulation-results.xml \
+            --html=reports/ci-simulation-report.html \
+            --self-contained-html
+
+      - name: Run verification-tool unit tests
+        run: |
+          python -m pytest \
+            -c pytest.ini \
+            -v \
+            tools/tests \
+            --junitxml=reports/ci-tools-results.xml \
+            --html=reports/ci-tools-report.html \
+            --self-contained-html
+
+      - name: Upload Python test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bmp280-python-test-reports
+          path: |
+            i2c/lab02_i2c_master/hil/reports/ci-*.xml
+            i2c/lab02_i2c_master/hil/reports/ci-*.html
+          if-no-files-found: warn
+          retention-days: 14
+
+  requirements-quality:
+    name: Requirements Traceability Quality Gates
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest pyserial
+
+      - name: Generate requirements traceability
+        run: |
+          python tools/generate_traceability.py
+
+      - name: Run G1 and G2 quality gates
+        run: |
+          python tools/check_quality_gates.py
+
+      - name: Upload requirements reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bmp280-requirements-quality-reports
+          path: |
+            i2c/lab02_i2c_master/hil/reports/requirements-traceability.csv
+            i2c/lab02_i2c_master/hil/reports/requirements-coverage.json
+            i2c/lab02_i2c_master/hil/reports/quality-gates.json
+          if-no-files-found: warn
+          retention-days: 14
