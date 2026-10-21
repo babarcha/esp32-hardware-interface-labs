@@ -1,10 +1,13 @@
-import pytest
-
 from serial_device import (
     SerialDevice,
     DeviceTimeoutError,
     DeviceProtocolError,
 )
+import pytest
+
+import pytest
+
+pytestmark = pytest.mark.simulation
 
 
 class FakeSerial:
@@ -101,3 +104,99 @@ def test_parse_sensor_info():
     assert info["SENSOR"] == "BMP280"
     assert info["ID"] == "0x58"
     assert info["ADDR"] == "0x76"
+
+
+def test_stale_uart_response_is_ignored():
+    from serial_device import SerialDevice
+
+    class FakeSerial:
+        is_open = True
+
+        def __init__(self):
+            self.responses = [
+                b"HIL:PONG\n",
+                b"HIL:STATUS=READY\n",
+            ]
+
+        def reset_input_buffer(self):
+            pass
+
+        def write(self, data):
+            return len(data)
+
+        def flush(self):
+            pass
+
+        def readline(self):
+            if self.responses:
+                return self.responses.pop(0)
+            return b""
+
+    client = SerialDevice(port="FAKE", timeout=0.5)
+    client.connection = FakeSerial()
+
+    assert client.get_status() == "READY"
+
+
+def test_measurement_ignores_stale_status():
+    from serial_device import SerialDevice
+
+    class FakeSerial:
+        is_open = True
+
+        def __init__(self):
+            self.responses = [
+                b"HIL:STATUS=READY\n",
+                b"HIL:TEMP_C=22.50;PRESSURE_HPA=1013.25\n",
+            ]
+
+        def reset_input_buffer(self):
+            pass
+
+        def write(self, data):
+            return len(data)
+
+        def flush(self):
+            pass
+
+        def readline(self):
+            if self.responses:
+                return self.responses.pop(0)
+            return b""
+
+    client = SerialDevice(port="FAKE", timeout=0.5)
+    client.connection = FakeSerial()
+
+    measurement = client.read_measurement()
+
+    assert measurement.temperature_c == 22.50
+    assert measurement.pressure_hpa == 1013.25
+
+
+def test_only_stale_responses_eventually_timeout():
+    import pytest
+    from serial_device import (
+        SerialDevice,
+        DeviceTimeoutError,
+    )
+
+    class FakeSerial:
+        is_open = True
+
+        def reset_input_buffer(self):
+            pass
+
+        def write(self, data):
+            return len(data)
+
+        def flush(self):
+            pass
+
+        def readline(self):
+            return b"HIL:PONG\n"
+
+    client = SerialDevice(port="FAKE", timeout=0.05)
+    client.connection = FakeSerial()
+
+    with pytest.raises(DeviceTimeoutError):
+        client.get_status()

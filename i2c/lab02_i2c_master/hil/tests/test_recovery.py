@@ -1,5 +1,6 @@
 
 from serial_device import SerialDevice
+import pytest
 
 
 def test_reinit_connected_sensor(device):
@@ -24,6 +25,7 @@ def test_repeated_reinitialization(device):
     assert device.get_status() == "READY"
 
 
+@pytest.mark.simulation
 def test_recovery_failure_response():
     class FakeSerial:
         is_open = True
