@@ -4,8 +4,11 @@ idf_component_register(
         "main.c"
         "spi_bus.c"
         "bmp280_spi.c"
+        "hil_uart.c"
     INCLUDE_DIRS
         "."
     REQUIRES
-        driver
+        esp_driver_spi
+        esp_driver_uart
+        freertos
 )

@@ -1,17 +1,15 @@
 
 /*
- * SPI Lab 03 — Pass 10.3
- *
- * BMP280 temperature and pressure measurement.
+ * SPI Lab 03 — Pass 10.4
+ * BMP280 SPI Hardware-in-the-Loop firmware.
  */
 
 #include <stdio.h>
-#include <stdint.h>
 
 #include "esp_err.h"
-
 #include "spi_bus.h"
 #include "bmp280_spi.h"
+#include "hil_uart.h"
 
 #define BMP280_CS_GPIO 5
 #define BMP280_CLOCK_HZ 1000000
@@ -20,19 +18,17 @@
 void app_main(void)
 {
     printf("\n");
-    printf("SPI Lab 03 - Pass 10.3: BMP280 Measurements\n");
-    printf("-------------------------------------------\n");
+    printf("SPI Lab 03 - Pass 10.4: BMP280 UART HIL\n");
+    printf("--------------------------------------\n");
 
     esp_err_t err = spi_bus_init();
 
     if (err != ESP_OK)
     {
-        printf("SPI bus initialization failed: %s\n",
+        printf("SPI initialization failed: %s\n",
                esp_err_to_name(err));
         return;
     }
-
-    printf("SPI bus initialized successfully\n");
 
     spi_device_handle_t device = NULL;
 
@@ -55,84 +51,28 @@ void app_main(void)
 
     if (err != ESP_OK)
     {
-        printf("Driver initialization failed: %s\n",
+        printf("BMP280 initialization failed: %s\n",
                esp_err_to_name(err));
         goto cleanup_device;
     }
 
-    uint8_t chip_id = 0;
+    printf("SPI device initialized\n");
 
-    err = bmp280_spi_read_chip_id(&sensor, &chip_id);
+    /*
+     * Run the UART command server.
+     * Normally this function does not return.
+     */
+    err = hil_uart_run(&sensor);
 
     if (err != ESP_OK)
     {
-        printf("Chip ID read failed: %s\n",
-               esp_err_to_name(err));
-        goto cleanup_device;
-    }
-
-    printf("BMP280 chip ID: 0x%02X\n", chip_id);
-
-    if (chip_id != BMP280_EXPECTED_ID)
-    {
-        printf("BMP280 verification: FAIL\n");
-        goto cleanup_device;
-    }
-
-    printf("BMP280 verification: PASS\n");
-
-    err = bmp280_spi_load_calibration(&sensor);
-
-    if (err != ESP_OK)
-    {
-        printf("Calibration read failed: %s\n",
-               esp_err_to_name(err));
-        goto cleanup_device;
-    }
-
-    printf("BMP280 calibration loaded successfully\n");
-
-    bmp280_measurement_t measurement = {0};
-
-    err = bmp280_spi_measure(
-        &sensor,
-        &measurement);
-
-    if (err == ESP_OK)
-    {
-        printf("\n");
-        printf("BMP280 Measurement Results\n");
-        printf("--------------------------\n");
-        printf("Temperature: %.2f C\n",
-               measurement.temperature_c);
-        printf("Pressure:    %.2f hPa\n",
-               measurement.pressure_hpa);
-        printf("BMP280 measurement: PASS\n");
-    }
-    else
-    {
-        printf("BMP280 measurement: FAIL (%s)\n",
+        printf("HIL UART failed: %s\n",
                esp_err_to_name(err));
     }
 
 cleanup_device:
-    {
-        esp_err_t cleanup_err =
-            spi_device_unregister(device);
-
-        if (cleanup_err != ESP_OK)
-            printf("Device cleanup failed: %s\n",
-                   esp_err_to_name(cleanup_err));
-    }
+    spi_device_unregister(device);
 
 cleanup_bus:
-    {
-        esp_err_t cleanup_err = spi_bus_deinit();
-
-        if (cleanup_err == ESP_OK)
-            printf("SPI resources released\n");
-        else
-            printf("SPI cleanup failed: %s\n",
-                   esp_err_to_name(cleanup_err));
-    }
+    spi_bus_deinit();
 }
