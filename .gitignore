@@ -1,40 +1,13 @@
-# ESP-IDF build output
-build/
-**/build/
-
-# Python
+# Python caches
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Generated test reports
+**/hil/reports/
+*.coverage
+htmlcov/
+
+# Local Python environments
 .venv/
 venv/
-
-# VS Code local configuration
-.vscode/
-
-# ESP-IDF / CMake generated files
-sdkconfig.old
-CMakeCache.txt
-CMakeFiles/
-compile_commands.json
-
-# Logs
-*.log
-
-# Windows
-Thumbs.db
-Desktop.ini
-**/build-native/
-
-.venv-hil/
-**/__pycache__/
-**/.pytest_cache/
-**/build-native/
-
-# BMP280 HIL generated evidence
-/i2c/lab02_i2c_master/hil/reports/
-
-# Python temporary files
-__pycache__/
-.pytest_cache/
-*.pyc

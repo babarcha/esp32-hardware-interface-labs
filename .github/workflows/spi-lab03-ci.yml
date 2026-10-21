@@ -1,0 +1,58 @@
+
+name: SPI Lab 03 - BMP280 CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "spi/lab03_spi_master/hil/**"
+      - ".github/workflows/spi-lab03-ci.yml"
+  pull_request:
+    paths:
+      - "spi/lab03_spi_master/hil/**"
+      - ".github/workflows/spi-lab03-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  spi-bmp280-simulation:
+    name: SPI BMP280 simulation tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: spi/lab03_spi_master/hil
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: spi/lab03_spi_master/hil/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run simulated HIL tests
+        run: |
+          mkdir -p reports
+          python -m pytest --device sim \
+            --junitxml=reports/spi-simulation.xml
+
+      - name: Upload pytest report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spi-lab03-simulation-report
+          path: spi/lab03_spi_master/hil/reports/spi-simulation.xml
+          if-no-files-found: warn
+          retention-days: 14
