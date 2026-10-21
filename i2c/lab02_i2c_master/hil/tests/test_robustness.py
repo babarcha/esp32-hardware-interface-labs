@@ -14,6 +14,7 @@ def test_long_command_rejected(device):
     assert response == "ERROR=COMMAND_TOO_LONG"
 
 
+@pytest.mark.requirement("REQ-HIL-008")
 def test_command_after_overflow(device):
     # Check that the parser recovers after a long command.
     device.send_command("X" * 100)

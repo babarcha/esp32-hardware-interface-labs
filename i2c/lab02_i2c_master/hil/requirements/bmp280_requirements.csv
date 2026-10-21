@@ -1,0 +1,11 @@
+﻿requirement_id,description,category
+REQ-HIL-001,Device shall respond to PING,Connectivity
+REQ-HIL-002,Device shall report sensor readiness,Connectivity
+REQ-HIL-003,Device shall return temperature measurements,Measurement
+REQ-HIL-004,Device shall return pressure measurements,Measurement
+REQ-HIL-005,Device shall report BMP280 identity,Identification
+REQ-HIL-006,Device shall reject unsupported commands,Protocol
+REQ-HIL-007,Device shall support sensor reinitialization,Recovery
+REQ-HIL-008,Device shall recover from oversized commands,Robustness
+REQ-HIL-009,Host shall detect UART response timeout,Host Validation
+REQ-HIL-010,Host shall reject malformed measurement responses,Host Validation

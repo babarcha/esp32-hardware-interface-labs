@@ -1,7 +1,11 @@
+
 import math
 import time
 
+import pytest
 
+
+@pytest.mark.requirement("REQ-HIL-003")
 def test_temperature_range(device):
     measurement = device.read_measurement()
 
@@ -9,6 +13,7 @@ def test_temperature_range(device):
     assert -40.0 <= measurement.temperature_c <= 85.0
 
 
+@pytest.mark.requirement("REQ-HIL-004")
 def test_pressure_range(device):
     measurement = device.read_measurement()
 

@@ -1,10 +1,11 @@
-import pytest
-
 from serial_device import (
     SerialDevice,
     DeviceTimeoutError,
     DeviceProtocolError,
 )
+import pytest
+
+pytestmark = pytest.mark.simulation
 
 
 class FakeSerial:
@@ -59,6 +60,7 @@ def test_ignore_non_protocol_logs():
     assert device.ping() is True
 
 
+@pytest.mark.requirement("REQ-HIL-009")
 def test_serial_timeout():
     device = make_device([])
 
@@ -73,6 +75,7 @@ def test_empty_hil_response():
         device.send_command("PING")
 
 
+@pytest.mark.requirement("REQ-HIL-010")
 def test_invalid_measurement_response():
     device = make_device([
         b"HIL:TEMP_C=INVALID;PRESSURE_HPA=1032.0\n"

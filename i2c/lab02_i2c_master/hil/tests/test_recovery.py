@@ -1,7 +1,10 @@
 
+import pytest
+
 from serial_device import SerialDevice
 
 
+@pytest.mark.requirement("REQ-HIL-007")
 def test_reinit_connected_sensor(device):
     assert device.reinit_sensor() is True
     assert device.get_status() == "READY"
@@ -24,6 +27,7 @@ def test_repeated_reinitialization(device):
     assert device.get_status() == "READY"
 
 
+@pytest.mark.simulation
 def test_recovery_failure_response():
     class FakeSerial:
         is_open = True
