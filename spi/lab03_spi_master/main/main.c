@@ -1,130 +1,163 @@
+
 /*
- * SPI Lab 03 — ESP32 SPI Master application.
+ * SPI Lab 03 — Pass 10.1
  *
- * Demonstrates SPI3 bus initialization, registration of a Mode 0 device,
- * a synchronous full-duplex transfer, and orderly resource cleanup.
- * No external peripheral is connected; RX bytes are not sensor readings.
+ * BMP280 SPI chip identification.
+ *
+ * Wiring:
+ *   ESP32 GPIO18 -> BMP280 SCL  (SCLK)
+ *   ESP32 GPIO23 -> BMP280 SDA  (MOSI)
+ *   ESP32 GPIO19 -> BMP280 SDO  (MISO)
+ *   ESP32 GPIO5  -> BMP280 CSB  (CS)
+ *   ESP32 3V3    -> BMP280 VCC
+ *   ESP32 GND    -> BMP280 GND
  */
+
 #include <stdio.h>
 #include <stdint.h>
 
 #include "esp_err.h"
 #include "spi_bus.h"
 
-#define SPI_CS_GPIO 5
-#define SPI_CLOCK_HZ 1000000
-#define SPI_MODE 0
+#define BMP280_CS_GPIO 5
+#define BMP280_SPI_CLOCK_HZ 1000000
+#define BMP280_SPI_MODE 0
+
+#define BMP280_CHIP_ID_REG 0xD0
+#define BMP280_EXPECTED_ID 0x58
+
+static esp_err_t bmp280_read_chip_id(
+    spi_device_handle_t device,
+    uint8_t *chip_id)
+{
+    if (device == NULL || chip_id == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /*
+     * BMP280 SPI:
+     *   bit 7 = 1: read
+     *   bits 6:0: register address
+     *
+     * Register 0xD0 becomes command 0xD0.
+     *
+     * The second byte generates clocks for
+     * the sensor to return its chip ID.
+     */
+    uint8_t tx_data[2] = {
+        (BMP280_CHIP_ID_REG & 0x7F) | 0x80,
+        0x00};
+
+    uint8_t rx_data[2] = {0};
+
+    esp_err_t result = spi_bus_transfer(
+        device,
+        tx_data,
+        rx_data,
+        sizeof(tx_data));
+
+    if (result != ESP_OK)
+    {
+        return result;
+    }
+
+    /*
+     * RX[0] corresponds to the command phase.
+     * RX[1] contains the requested register value.
+     */
+    *chip_id = rx_data[1];
+
+    return ESP_OK;
+}
 
 void app_main(void)
 {
     printf("\n");
-    printf("SPI Lab 03 - Pass 5: Bus Abstraction\n");
-    printf("------------------------------------\n");
+    printf("SPI Lab 03 - Pass 10.1: BMP280 Chip ID\n");
+    printf("-------------------------------------\n");
 
-    /* Configure the shared physical SPI bus before registering a device. */
     esp_err_t result = spi_bus_init();
 
     if (result != ESP_OK)
     {
         printf(
-            "SPI initialization failed: %s\n",
+            "SPI bus initialization failed: %s\n",
             esp_err_to_name(result));
-
         return;
     }
 
     printf("SPI bus initialized successfully\n");
 
-    /* Each SPI target has its own device handle and chip-select settings. */
-    spi_device_handle_t device_handle = NULL;
+    spi_device_handle_t bmp280 = NULL;
 
     result = spi_device_register(
-        SPI_CS_GPIO,
-        SPI_CLOCK_HZ,
-        SPI_MODE,
-        &device_handle);
+        BMP280_CS_GPIO,
+        BMP280_SPI_CLOCK_HZ,
+        BMP280_SPI_MODE,
+        &bmp280);
 
     if (result != ESP_OK)
     {
         printf(
-            "SPI device registration failed: %s\n",
+            "BMP280 registration failed: %s\n",
             esp_err_to_name(result));
 
         spi_bus_deinit();
         return;
     }
 
-    printf("SPI device registered successfully\n");
+    printf("BMP280 SPI device registered\n");
 
-    /*
-     * SPI clocks data out on MOSI while sampling MISO simultaneously.
-     * This arbitrary payload exercises the driver, not a device protocol.
-     */
-    uint8_t tx_data[] = {
-        0x9A,
-        0xBC,
-        0xDE};
+    uint8_t chip_id = 0;
 
-    uint8_t rx_data[sizeof(tx_data)] = {0};
-
-    result = spi_bus_transfer(
-        device_handle,
-        tx_data,
-        rx_data,
-        sizeof(tx_data));
+    result = bmp280_read_chip_id(
+        bmp280,
+        &chip_id);
 
     if (result == ESP_OK)
     {
-        printf("SPI transaction completed successfully\n");
+        printf("BMP280 chip ID: 0x%02X\n", chip_id);
 
-        printf("TX: ");
-
-        for (size_t i = 0; i < sizeof(tx_data); i++)
+        if (chip_id == BMP280_EXPECTED_ID)
         {
-            printf("0x%02X ", tx_data[i]);
+            printf("BMP280 SPI verification: PASS\n");
         }
-
-        printf("\nRX: ");
-
-        for (size_t i = 0; i < sizeof(rx_data); i++)
+        else
         {
-            printf("0x%02X ", rx_data[i]);
+            printf(
+                "BMP280 SPI verification: FAIL "
+                "(expected 0x%02X)\n",
+                BMP280_EXPECTED_ID);
         }
-
-        printf("\n");
-        printf(
-            "NOTE: RX data is not meaningful without "
-            "a connected SPI peripheral.\n");
     }
     else
     {
         printf(
-            "SPI transaction failed: %s\n",
+            "BMP280 SPI transaction failed: %s\n",
             esp_err_to_name(result));
     }
 
-    /* Remove the device before freeing the shared bus resources. */
-
-    result = spi_device_unregister(device_handle);
+    result = spi_device_unregister(bmp280);
 
     if (result != ESP_OK)
     {
-        printf("SPI device removal failed: %s\n",
-               esp_err_to_name(result));
+        printf(
+            "SPI device cleanup failed: %s\n",
+            esp_err_to_name(result));
         return;
     }
-
-    printf("SPI device removed successfully\n");
 
     result = spi_bus_deinit();
 
     if (result != ESP_OK)
     {
-        printf("SPI bus cleanup failed: %s\n",
-               esp_err_to_name(result));
+        printf(
+            "SPI bus cleanup failed: %s\n",
+            esp_err_to_name(result));
     }
     else
     {
-        printf("SPI bus released successfully\n");
+        printf("SPI resources released\n");
     }
 }
