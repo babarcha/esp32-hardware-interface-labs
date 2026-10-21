@@ -33,3 +33,14 @@ def device(request):
         timeout=3.0,
     ) as connected_device:
         yield connected_device
+
+
+def pytest_collection_modifyitems(items):
+    """
+    Automatically classify unmarked HIL tests as hardware tests.
+
+    Tests explicitly marked as simulation remain simulation tests.
+    """
+    for item in items:
+        if item.get_closest_marker("simulation") is None:
+            item.add_marker(pytest.mark.hardware)

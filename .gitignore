@@ -30,3 +30,11 @@ Desktop.ini
 **/__pycache__/
 **/.pytest_cache/
 **/build-native/
+
+# BMP280 HIL generated evidence
+/i2c/lab02_i2c_master/hil/reports/
+
+# Python temporary files
+__pycache__/
+.pytest_cache/
+*.pyc
