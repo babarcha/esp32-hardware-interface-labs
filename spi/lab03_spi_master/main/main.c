@@ -1,15 +1,8 @@
 
 /*
- * SPI Lab 03 — Pass 10.2
+ * SPI Lab 03 — Pass 10.3
  *
- * Modular BMP280 SPI driver integration.
- *
- * Application responsibilities:
- * 1. Initialize SPI bus.
- * 2. Register BMP280 SPI device.
- * 3. Initialize BMP280 driver context.
- * 4. Read and verify BMP280 chip ID.
- * 5. Release SPI resources.
+ * BMP280 temperature and pressure measurement.
  */
 
 #include <stdio.h>
@@ -27,17 +20,15 @@
 void app_main(void)
 {
     printf("\n");
-    printf("SPI Lab 03 - Pass 10.2: Modular BMP280 Driver\n");
-    printf("---------------------------------------------\n");
+    printf("SPI Lab 03 - Pass 10.3: BMP280 Measurements\n");
+    printf("-------------------------------------------\n");
 
-    esp_err_t result = spi_bus_init();
+    esp_err_t err = spi_bus_init();
 
-    if (result != ESP_OK)
+    if (err != ESP_OK)
     {
-        printf(
-            "SPI bus initialization failed: %s\n",
-            esp_err_to_name(result));
-
+        printf("SPI bus initialization failed: %s\n",
+               esp_err_to_name(err));
         return;
     }
 
@@ -45,103 +36,103 @@ void app_main(void)
 
     spi_device_handle_t device = NULL;
 
-    result = spi_device_register(
+    err = spi_device_register(
         BMP280_CS_GPIO,
         BMP280_CLOCK_HZ,
         BMP280_SPI_MODE,
         &device);
 
-    if (result != ESP_OK)
+    if (err != ESP_OK)
     {
-        printf(
-            "SPI device registration failed: %s\n",
-            esp_err_to_name(result));
-
+        printf("Device registration failed: %s\n",
+               esp_err_to_name(err));
         goto cleanup_bus;
     }
 
-    printf("BMP280 SPI device registered\n");
-
     bmp280_spi_t sensor = {0};
 
-    result = bmp280_spi_init(
-        &sensor,
-        device);
+    err = bmp280_spi_init(&sensor, device);
 
-    if (result != ESP_OK)
+    if (err != ESP_OK)
     {
-        printf(
-            "BMP280 driver initialization failed: %s\n",
-            esp_err_to_name(result));
-
+        printf("Driver initialization failed: %s\n",
+               esp_err_to_name(err));
         goto cleanup_device;
     }
 
-    printf("BMP280 driver initialized\n");
-
     uint8_t chip_id = 0;
 
-    result = bmp280_spi_read_chip_id(
-        &sensor,
-        &chip_id);
+    err = bmp280_spi_read_chip_id(&sensor, &chip_id);
 
-    if (result != ESP_OK)
+    if (err != ESP_OK)
     {
-        printf(
-            "BMP280 chip ID read failed: %s\n",
-            esp_err_to_name(result));
-
+        printf("Chip ID read failed: %s\n",
+               esp_err_to_name(err));
         goto cleanup_device;
     }
 
     printf("BMP280 chip ID: 0x%02X\n", chip_id);
 
-    result = bmp280_spi_verify(&sensor);
-
-    if (result == ESP_OK)
+    if (chip_id != BMP280_EXPECTED_ID)
     {
-        printf("BMP280 SPI verification: PASS\n");
+        printf("BMP280 verification: FAIL\n");
+        goto cleanup_device;
+    }
+
+    printf("BMP280 verification: PASS\n");
+
+    err = bmp280_spi_load_calibration(&sensor);
+
+    if (err != ESP_OK)
+    {
+        printf("Calibration read failed: %s\n",
+               esp_err_to_name(err));
+        goto cleanup_device;
+    }
+
+    printf("BMP280 calibration loaded successfully\n");
+
+    bmp280_measurement_t measurement = {0};
+
+    err = bmp280_spi_measure(
+        &sensor,
+        &measurement);
+
+    if (err == ESP_OK)
+    {
+        printf("\n");
+        printf("BMP280 Measurement Results\n");
+        printf("--------------------------\n");
+        printf("Temperature: %.2f C\n",
+               measurement.temperature_c);
+        printf("Pressure:    %.2f hPa\n",
+               measurement.pressure_hpa);
+        printf("BMP280 measurement: PASS\n");
     }
     else
     {
-        printf(
-            "BMP280 SPI verification: FAIL (%s)\n",
-            esp_err_to_name(result));
+        printf("BMP280 measurement: FAIL (%s)\n",
+               esp_err_to_name(err));
     }
 
 cleanup_device:
-
     {
-        esp_err_t cleanup_result =
+        esp_err_t cleanup_err =
             spi_device_unregister(device);
 
-        if (cleanup_result != ESP_OK)
-        {
-            printf(
-                "SPI device cleanup failed: %s\n",
-                esp_err_to_name(cleanup_result));
-        }
-        else
-        {
-            printf("SPI device unregistered\n");
-        }
+        if (cleanup_err != ESP_OK)
+            printf("Device cleanup failed: %s\n",
+                   esp_err_to_name(cleanup_err));
     }
 
 cleanup_bus:
-
     {
-        esp_err_t cleanup_result =
-            spi_bus_deinit();
+        esp_err_t cleanup_err = spi_bus_deinit();
 
-        if (cleanup_result != ESP_OK)
-        {
-            printf(
-                "SPI bus cleanup failed: %s\n",
-                esp_err_to_name(cleanup_result));
-        }
-        else
-        {
+        if (cleanup_err == ESP_OK)
             printf("SPI resources released\n");
-        }
+        else
+            printf("SPI cleanup failed: %s\n",
+                   esp_err_to_name(cleanup_err));
     }
 }
