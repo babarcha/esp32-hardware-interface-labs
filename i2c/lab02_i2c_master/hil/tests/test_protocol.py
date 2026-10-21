@@ -1,3 +1,7 @@
+import pytest
+
+
+@pytest.mark.requirement("REQ-HIL-006")
 def test_unknown_command(device):
     response = device.send_command("UNKNOWN")
 

@@ -1,4 +1,9 @@
+import pytest
+
+
+@pytest.mark.requirement("REQ-HIL-005")
 def test_sensor_identity(device):
+    # Keep the existing function body unchanged
     info = device.get_sensor_info()
 
     assert info["SENSOR"] == "BMP280"
