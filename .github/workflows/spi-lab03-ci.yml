@@ -3,20 +3,30 @@ name: SPI Lab 03 - BMP280 CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
       - "spi/lab03_spi_master/hil/**"
+      - "spi/lab03_spi_master/main/**"
+      - "spi/lab03_spi_master/tests/**"
       - ".github/workflows/spi-lab03-ci.yml"
+
   pull_request:
     paths:
       - "spi/lab03_spi_master/hil/**"
+      - "spi/lab03_spi_master/main/**"
+      - "spi/lab03_spi_master/tests/**"
       - ".github/workflows/spi-lab03-ci.yml"
+
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  # ---------------------------------------------------
+  # Job 1: Python protocol simulation
+  # ---------------------------------------------------
   spi-bmp280-simulation:
     name: SPI BMP280 simulation tests
     runs-on: ubuntu-24.04
@@ -48,11 +58,52 @@ jobs:
           python -m pytest --device sim \
             --junitxml=reports/spi-simulation.xml
 
-      - name: Upload pytest report
+      - name: Upload Python test report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: spi-lab03-simulation-report
           path: spi/lab03_spi_master/hil/reports/spi-simulation.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ---------------------------------------------------
+  # Job 2: Host-native C unit tests
+  # ---------------------------------------------------
+  spi-native-tests:
+    name: SPI native C tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure native tests
+        run: |
+          cmake \
+            -S spi/lab03_spi_master/tests/native \
+            -B spi/lab03_spi_master/build-native \
+            -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build native tests
+        run: |
+          cmake --build \
+            spi/lab03_spi_master/build-native \
+            --parallel 2
+
+      - name: Run native C tests
+        run: |
+          ctest \
+            --test-dir spi/lab03_spi_master/build-native \
+            --output-on-failure \
+            --output-junit spi-native.xml
+
+      - name: Upload native C test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spi-lab03-native-report
+          path: spi/lab03_spi_master/build-native/spi-native.xml
           if-no-files-found: warn
           retention-days: 14

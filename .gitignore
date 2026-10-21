@@ -1,13 +1,19 @@
-# Python caches
-__pycache__/
-*.py[cod]
-.pytest_cache/
+# ESP-IDF build outputs
+**/build/
+
+# Native CMake test builds
+**/build-native/
+
+# Local VS Code settings
+**/.vscode/
+
+# ESP-IDF configuration backups
+**/sdkconfig.old
+
+# Python temporary files
+**/__pycache__/
+**/.pytest_cache/
+*.pyc
 
 # Generated test reports
-**/hil/reports/
-*.coverage
-htmlcov/
-
-# Local Python environments
-.venv/
-venv/
+**/reports/
