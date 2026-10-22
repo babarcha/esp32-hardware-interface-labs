@@ -23,3 +23,16 @@
 /spi/lab03_spi_master/build-coverage-ci/
 /spi/lab03_spi_master/reports/coverage/
 /spi/lab03_spi_master/reports/coverage-ci/
+
+**/build-coverage/
+**/coverage-report/
+
+/qualification-build/
+
+# Repository-wide qualification artifacts
+/qualification-build/
+
+# I2C generated test and coverage builds
+/i2c/lab02_i2c_master/build-native/
+/i2c/lab02_i2c_master/build-coverage/
+/i2c/lab02_i2c_master/coverage-report/
