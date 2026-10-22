@@ -26,3 +26,39 @@ endforeach()
 
 add_test(NAME bmp280_compensation COMMAND test_bmp280_compensation)
 add_test(NAME i2c_bus COMMAND test_i2c_bus)
+
+
+# Sensor-manager native tests with mocked sensor and FreeRTOS APIs.
+add_executable(
+    test_sensor_manager
+    native/test_sensor_manager.c
+    ../main/sensor_manager.c
+)
+
+target_include_directories(
+    test_sensor_manager
+    PRIVATE
+    native/mocks
+    ../main
+)
+
+set_target_properties(
+    test_sensor_manager
+    PROPERTIES
+    C_STANDARD 11
+    C_STANDARD_REQUIRED YES
+)
+
+if(MSVC)
+    target_compile_options(test_sensor_manager PRIVATE /W4)
+else()
+    target_compile_options(
+        test_sensor_manager
+        PRIVATE -Wall -Wextra -Werror
+    )
+endif()
+
+add_test(
+    NAME sensor_manager
+    COMMAND test_sensor_manager
+)
