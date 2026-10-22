@@ -15,6 +15,8 @@ A hands-on embedded software engineering portfolio comprising four ESP32 periphe
 | [03](spi/lab03_spi_master/) | SPI | Bus/device abstraction and BMP280 SPI driver | **2/2 CTest executables passed** | Pending physical SPI sensor test |
 | [04](can/lab04_twai/) | CAN/TWAI | Driver lifecycle, frame validation, TX/RX API | **14 native test groups passed** | Pending external transceiver and second CAN node |
 
+- [Firmware and Verification Architecture](docs/ARCHITECTURE.md)
+
 > Test counts have different granularities: individual UART cases, CTest executables, and CAN/TWAI test groups. They should not be interpreted as equivalent test-case counts.
 
 ## Architecture and verification strategy
