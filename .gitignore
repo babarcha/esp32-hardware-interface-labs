@@ -36,3 +36,9 @@
 /i2c/lab02_i2c_master/build-native/
 /i2c/lab02_i2c_master/build-coverage/
 /i2c/lab02_i2c_master/coverage-report/
+
+**/build/
+**/build-native/
+**/build-coverage/
+
+**/build-ninja/
