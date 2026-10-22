@@ -1,221 +1,186 @@
-# ESP32 SPI Master Interface Lab
+﻿# ESP32 SPI Lab 03 â€” BMP280 Sensor and HIL Validation
+
+## Overview
+
+An embedded firmware and verification lab built using ESP32, ESP-IDF, C, Python, CMake, pytest and GitHub Actions.
+
+The project demonstrates SPI master communication with a BMP280 environmental sensor, modular firmware development, native unit testing, simulated Hardware-in-the-Loop (HIL) testing, physical HIL test support, fault injection and automated code coverage qualification.
 
-A reusable SPI master interface implemented on ESP32 using ESP-IDF.
+**Hardware:** ESP32 + BMP280 SPI breakout
+**Framework:** ESP-IDF v5.5.5
+**Language:** C11 firmware and Python validation
+**SPI:** SPI3_HOST, Mode 0, 1 MHz
+**UART:** 115200 baud, 8N1
+
+## 1. Learning objectives
 
-This lab demonstrates SPI bus initialization, device registration, full-duplex
-transactions, transmit/receive APIs, resource lifecycle management, and basic
-error handling.
+- Configure an ESP32 SPI master and register a peripheral
+- Implement synchronous SPI read, write and full-duplex transfers
+- Separate bus-level and sensor-level responsibilities
+- Read and validate BMP280 identification and calibration data
+- Implement temperature and pressure compensation
+- Handle SPI failures, invalid responses and conversion timeouts
+- Build host-native tests using mocked hardware dependencies
+- Implement a UART protocol for automated HIL testing
+- Enforce source coverage thresholds through CI/CD
 
-## Objectives
+## 2. Firmware architecture
 
-- Configure ESP32 as an SPI master
-- Understand MOSI, MISO, SCLK, and CS
-- Understand SPI modes 0-3
-- Register SPI devices using ESP-IDF device handles
-- Perform synchronous SPI transactions
-- Implement write, read, and full-duplex transfer APIs
-- Separate application logic from hardware-interface logic
-- Manage SPI device and bus lifecycle safely
+```text
+main.c
+  |
+  +-- spi_bus.c
+  |     +-- ESP-IDF SPI master driver
+  |             +-- ESP32 SPI3_HOST
+  |                     +-- BMP280
+  |
+  +-- bmp280_spi.c
+  |     +-- Chip identification
+  |     +-- Calibration
+  |     +-- Forced measurement
+  |     +-- Compensation
+  |
+  +-- hil_uart.c
+        +-- UART commands
+        +-- Sensor status
+        +-- Measurements
+        +-- Reinitialization
+```
 
-## Hardware Configuration
+The BMP280 driver uses the SPI abstraction instead of directly constructing ESP-IDF SPI transactions.
 
-| Signal | ESP32 GPIO | Direction |
-|---|---:|---|
-| MOSI | GPIO23 | Master → Peripheral |
-| MISO | GPIO19 | Peripheral → Master |
-| SCLK | GPIO18 | Master → Peripheral |
-| CS | GPIO5 | Master → Peripheral |
+## 3. Hardware configuration
 
-SPI host:
+| Signal | ESP32 | BMP280 |
+|---|---|---|
+| MOSI | GPIO23 | SDI |
+| MISO | GPIO19 | SDO |
+| SCLK | GPIO18 | SCK |
+| CS | GPIO5 | CSB |
+| Power | 3V3 | 3.3 V-compatible supply |
+| Ground | GND | GND |
 
-    SPI3_HOST
+Use a BMP280 breakout that supports four-wire SPI. Confirm the module's electrical specifications before connecting power.
 
-Example device configuration:
+## 4. SPI protocol
 
-    Clock: 1 MHz
-    Mode: 0
-    CS: GPIO5
+The BMP280 uses register-based SPI communication.
 
-## Architecture
+For register reads, the firmware sets the read bit in the command byte, clocks additional bytes and discards the command-phase received byte.
 
-    Application
-       main.c
-          |
-          v
-       spi_bus.h
-          |
-          v
-       spi_bus.c
-          |
-          v
-    ESP-IDF SPI Master Driver
-          |
-          v
-       SPI3_HOST
-          |
-       MOSI / MISO / SCLK / CS
+For writes, it clears the read bit and transmits the register address followed by the value.
 
-`main.c` contains application-level behavior.
+SPI transactions use ESP-IDF's synchronous device-transmit API.
 
-`spi_bus.c` contains ESP32 and ESP-IDF-specific SPI implementation details.
+## 5. Sensor operation
 
-`spi_bus.h` exposes the reusable interface.
+The measurement workflow is:
 
-## SPI Device Selection
+1. Verify BMP280 chip ID (`0x58`).
+2. Read calibration coefficients.
+3. Validate essential calibration values.
+4. Trigger a forced measurement.
+5. Poll sensor status until ready or timeout.
+6. Read raw pressure and temperature registers.
+7. Reject invalid ADC markers.
+8. Apply Bosch compensation formulas.
+9. Return temperature in Â°C and pressure in hPa.
 
-Unlike I2C, SPI does not normally use bus addresses.
+## 6. UART HIL protocol
 
-I2C:
+Commands are newline-terminated ASCII strings. Responses begin with `RSP:`.
 
-    Controller
-        |
-        +---- address 0x68
-        +---- address 0x76
+| Command | Example response |
+|---|---|
+| PING | RSP:PONG |
+| GET_STATUS | RSP:STATUS=READY |
+| GET_SENSOR_INFO | RSP:SENSOR=BMP280;BUS=SPI;CHIP_ID=0x58 |
+| READ_SENSOR | RSP:TEMP_C=25.08;PRESSURE_HPA=1006.53 |
+| REINIT_SENSOR | RSP:REINIT=OK |
 
-SPI:
+Example measurement values are illustrative, not actual hardware readings.
 
-    Master
-        |
-        +---- CS1 ---- Device 1
-        |
-        +---- CS2 ---- Device 2
+Error responses include sensor-not-ready, measurement-failed, reinitialization-failed and unknown-command cases.
 
-MOSI, MISO, and SCLK can be shared between devices, while each device normally
-has its own chip-select signal.
+## 7. Build and flash
 
-## SPI Modes
+Load the ESP-IDF environment, then run:
 
-SPI communication is controlled by clock polarity (CPOL) and clock phase
-(CPHA).
+```powershell
+cd spi/lab03_spi_master
+idf.py build
+idf.py -p COM3 flash
+idf.py -p COM3 monitor
+```
 
-| Mode | CPOL | CPHA | Clock Idle |
-|---|---:|---:|---|
-| 0 | 0 | 0 | Low |
-| 1 | 0 | 1 | Low |
-| 2 | 1 | 0 | High |
-| 3 | 1 | 1 | High |
+Exit the serial monitor with `Ctrl+]` before running serial HIL tests.
 
-The correct mode depends on the target peripheral.
+## 8. Native C testing
 
-This lab currently uses Mode 0.
+Native tests compile production C source files with mocked hardware dependencies.
 
-## Public API
+The tests cover SPI bus lifecycle, argument validation, sensor initialization, register transactions, calibration, compensation, conversion polling, timeouts, fault injection and recovery.
 
-### Bus lifecycle
+The project uses CMake and CTest to run the native test executables.
 
-    spi_bus_init()
-    spi_bus_deinit()
+## 9. Coverage qualification
 
-### Device lifecycle
+On the configured Windows development environment, run from the repository root:
 
-    spi_device_register()
-    spi_device_unregister()
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\spi\lab03_spi_master\scripts\check_coverage.ps1
+```
 
-### Transactions
+Minimum accepted production coverage:
 
-    spi_bus_write()
-    spi_bus_read()
-    spi_bus_transfer()
+| Metric | Gate |
+|---|---:|
+| Line coverage | 90% |
+| Branch coverage | 80% |
 
-`spi_bus_transfer()` performs a full-duplex SPI transaction.
+Pass 10.10 measured 97.8% line coverage, 87.1% branch coverage and 100% function coverage. Consult the latest CI artifact for current measurements.
 
-## Example Transaction
+## 10. Python validation
 
-The demonstration application transmits:
+The Python validation framework supports simulated and physical serial-device execution.
 
-    0x9A 0xBC 0xDE
+From the `hil` directory:
 
-using:
+```powershell
+python -m pip install -r requirements.txt
+python -m pytest --device sim -v
+python -m pytest --device serial --port COM3 -v
+```
 
-    spi_bus_transfer()
+The serial tests require connected ESP32 hardware and an available serial port.
 
-ESP-IDF represents transaction lengths in bits, so a three-byte transaction is:
+## 11. GitHub Actions
 
-    3 bytes × 8 = 24 bits
+The SPI Lab 03 CI workflow runs:
 
-## Resource Lifecycle
+- Python simulation tests
+- Native C tests
+- Production code coverage qualification
 
-The normal lifecycle is:
+Coverage and test reports are retained as GitHub Actions artifacts.
 
-    spi_bus_init()
-          |
-          v
-    spi_device_register()
-          |
-          v
-    SPI transaction(s)
-          |
-          v
-    spi_device_unregister()
-          |
-          v
-    spi_bus_deinit()
+Physical hardware tests are not executed by the standard cloud runner.
 
-The abstraction performs argument and state validation to reduce invalid API
-usage.
+## 12. Release qualification
 
-## Build
+See `RELEASE_QUALIFICATION.md` and `HIL_VALIDATION.md`.
 
-Activate ESP-IDF and build from this directory:
+Automated CI is successful, but physical HIL qualification remains pending until actual hardware results have been recorded.
 
-    idf.py build
+## 13. Engineering limitations
 
-Flash:
+- The SPI bus initialization flag is not a concurrency lock.
+- UART sensor readiness is based on initialization state.
+- Native mocks do not reproduce all physical timing and electrical conditions.
+- Coverage alone does not establish functional correctness.
+- Physical SPI waveform verification requires hardware instrumentation.
 
-    idf.py -p COM3 flash
+## 14. Skills demonstrated
 
-Monitor:
-
-    idf.py -p COM3 monitor
-
-Exit the monitor with:
-
-    Ctrl + ]
-
-## Validation
-
-The following ESP32-side functionality has been exercised:
-
-- SPI bus initialization
-- SPI device registration
-- Synchronous SPI transaction execution
-- Device removal
-- SPI bus release
-- Abstraction-layer lifecycle
-
-Example runtime output:
-
-    SPI Lab 03 - Pass 5: Bus Abstraction
-    ------------------------------------
-    SPI bus initialized successfully
-    SPI device registered successfully
-    SPI transaction completed successfully
-    TX: 0x9A 0xBC 0xDE
-    RX: 0x9A 0xBC 0xDE
-    NOTE: RX data is not meaningful without a connected SPI peripheral.
-    SPI device removed successfully
-    SPI bus released successfully
-
-## Hardware Validation Limitation
-
-No external SPI peripheral is currently connected.
-
-Therefore, successful completion of `spi_device_transmit()` demonstrates that
-the ESP32 SPI driver executed the configured transaction, but it does not prove
-that a real peripheral received or understood the data.
-
-In particular, the observed RX bytes must not be interpreted as valid
-peripheral data.
-
-A future hardware-validation pass can use:
-
-- A real SPI sensor or memory device
-- An oscilloscope
-- A logic analyzer
-
-to verify CS, SCLK, MOSI, MISO, SPI mode, timing, and device-specific protocol
-behavior.
-
-## ESP-IDF
-
-Developed using ESP-IDF 5.5.5.
+Embedded C, ESP-IDF, SPI, sensor drivers, error propagation, calibration and fixed-point compensation, CMake, native unit testing, fault injection, pytest, HIL testing, GitHub Actions, GCOV and GCOVR.
