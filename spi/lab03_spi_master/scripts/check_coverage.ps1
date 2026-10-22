@@ -156,6 +156,25 @@ print("Python can launch GCOV successfully")
     $PythonCode | & $Python - $Gcov
 }
 
+
+# Configure a clean or existing coverage build directory.
+Invoke-Checked "Configure native coverage build" {
+    & $CMake `
+        -S $SourceDir `
+        -B $BuildDir `
+        -G "MinGW Makefiles" `
+        "-DCMAKE_C_COMPILER=$Gcc" `
+        "-DCMAKE_MAKE_PROGRAM=$Make" `
+        -DENABLE_COVERAGE=ON `
+        -DCMAKE_BUILD_TYPE=Debug
+}
+
+# Ensure report output directory exists.
+New-Item `
+    -ItemType Directory `
+    -Path $ReportDir `
+    -Force | Out-Null
+
 # ------------------------------------------------------------
 # 7. Build native C tests
 # ------------------------------------------------------------

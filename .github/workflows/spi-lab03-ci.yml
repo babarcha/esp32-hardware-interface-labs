@@ -1,4 +1,4 @@
-
+﻿
 name: SPI Lab 03 - BMP280 CI
 
 on:
@@ -105,5 +105,92 @@ jobs:
         with:
           name: spi-lab03-native-report
           path: spi/lab03_spi_master/build-native/spi-native.xml
+          if-no-files-found: warn
+          retention-days: 14
+  # ---------------------------------------------------
+  # Job 3: Production C coverage qualification
+  # ---------------------------------------------------
+  spi-coverage-gate:
+    name: SPI BMP280 coverage gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install GCOVR
+        run: |
+          python -m pip install "gcovr==8.7"
+
+      - name: Verify coverage toolchain
+        run: |
+          gcc --version
+          gcov --version
+          cmake --version
+          python -m gcovr --version
+
+      - name: Configure instrumented native tests
+        run: |
+          cmake \
+            -S spi/lab03_spi_master/tests/native \
+            -B spi/lab03_spi_master/build-coverage-ci \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DENABLE_COVERAGE=ON
+
+      - name: Build instrumented native tests
+        run: |
+          cmake --build \
+            spi/lab03_spi_master/build-coverage-ci \
+            --parallel 2
+
+      - name: Execute native tests
+        run: |
+          ctest \
+            --test-dir spi/lab03_spi_master/build-coverage-ci \
+            --output-on-failure \
+            --output-junit spi-coverage-tests.xml
+
+      - name: Generate HTML coverage report
+        run: |
+          mkdir -p spi/lab03_spi_master/reports/coverage-ci
+
+          python -m gcovr \
+            --root spi/lab03_spi_master/main \
+            --filter '.*spi_bus\.c$' \
+            --filter '.*bmp280_spi\.c$' \
+            --exclude '.*tests/.*' \
+            --object-directory spi/lab03_spi_master/build-coverage-ci \
+            --gcov-executable gcov \
+            --html-details \
+            spi/lab03_spi_master/reports/coverage-ci/index.html \
+            --print-summary
+
+      - name: Enforce coverage thresholds
+        run: |
+          python -m gcovr \
+            --root spi/lab03_spi_master/main \
+            --filter '.*spi_bus\.c$' \
+            --filter '.*bmp280_spi\.c$' \
+            --exclude '.*tests/.*' \
+            --object-directory spi/lab03_spi_master/build-coverage-ci \
+            --gcov-executable gcov \
+            --fail-under-line 90 \
+            --fail-under-branch 80 \
+            --print-summary
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spi-lab03-coverage-report
+          path: |
+            spi/lab03_spi_master/reports/coverage-ci/
+            spi/lab03_spi_master/build-coverage-ci/spi-coverage-tests.xml
           if-no-files-found: warn
           retention-days: 14

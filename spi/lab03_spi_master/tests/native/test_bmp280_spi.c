@@ -597,6 +597,160 @@ static void test_recovery_after_spi_failure(void)
 }
 
 /* -----------------------------------------------------
+ * Pass 10.11 — Fault injection and data integrity
+ * ----------------------------------------------------- */
+
+/*
+ * Reject all four invalid calibration conditions.
+ * Calibration must remain marked as unavailable.
+ */
+static void test_invalid_calibration_boundaries(void)
+{
+    const uint16_t invalid_values[] = {
+        0,
+        UINT16_MAX};
+
+    for (size_t i = 0; i < 2; ++i)
+    {
+        /* Invalid temperature coefficient. */
+        reset_mock();
+        valid_calibration();
+
+        set_u16(0x88, invalid_values[i]);
+
+        bmp280_spi_t sensor = new_sensor();
+
+        CHECK(bmp280_spi_load_calibration(&sensor) ==
+              ESP_ERR_INVALID_RESPONSE);
+
+        CHECK(!sensor.calibration_loaded);
+
+        /* Invalid pressure coefficient. */
+        reset_mock();
+        valid_calibration();
+
+        set_u16(0x8E, invalid_values[i]);
+
+        sensor = new_sensor();
+
+        CHECK(bmp280_spi_load_calibration(&sensor) ==
+              ESP_ERR_INVALID_RESPONSE);
+
+        CHECK(!sensor.calibration_loaded);
+    }
+}
+
+/*
+ * Reject invalid temperature ADC values.
+ * The existing Pass 10.8 test covers pressure.
+ */
+static void test_invalid_temperature_adc(void)
+{
+    reset_mock();
+
+    bmp280_spi_t sensor =
+        calibrated_reference_sensor();
+
+    bmp280_measurement_t result = {0};
+
+    set_adc20(0xFA, 0x80000);
+
+    CHECK(bmp280_spi_measure(&sensor, &result) ==
+          ESP_ERR_INVALID_RESPONSE);
+}
+
+/*
+ * Verify that failed measurements do not overwrite
+ * a previously valid result.
+ */
+static void test_measurement_preserves_output_on_failure(void)
+{
+    reset_mock();
+
+    bmp280_spi_t sensor =
+        calibrated_reference_sensor();
+
+    bmp280_measurement_t result = {
+        .temperature_c = 42.5f,
+        .pressure_hpa = 999.0f};
+
+    /* Inject a failure during status-register reading. */
+    fail_read_on_call = read_calls + 1;
+
+    CHECK(bmp280_spi_measure(&sensor, &result) ==
+          ESP_FAIL);
+
+    CHECK(result.temperature_c == 42.5f);
+    CHECK(result.pressure_hpa == 999.0f);
+
+    /* Restore communication and verify recovery. */
+    fail_read_on_call = 0;
+
+    CHECK(bmp280_spi_measure(&sensor, &result) ==
+          ESP_OK);
+
+    CHECK(result.temperature_c > 25.07f);
+    CHECK(result.temperature_c < 25.09f);
+}
+
+/*
+ * A failed calibration reload must invalidate
+ * previously loaded calibration.
+ */
+static void test_calibration_reload_failure(void)
+{
+    reset_mock();
+
+    bmp280_spi_t sensor =
+        calibrated_reference_sensor();
+
+    CHECK(sensor.calibration_loaded);
+
+    /* Simulate an SPI failure during recalibration. */
+    fail_read_on_call = read_calls + 1;
+
+    CHECK(bmp280_spi_load_calibration(&sensor) ==
+          ESP_FAIL);
+
+    CHECK(!sensor.calibration_loaded);
+
+    bmp280_measurement_t result = {0};
+
+    CHECK(bmp280_spi_measure(&sensor, &result) ==
+          ESP_ERR_INVALID_STATE);
+
+    /* Restore the bus and reload calibration. */
+    fail_read_on_call = 0;
+
+    CHECK(bmp280_spi_load_calibration(&sensor) ==
+          ESP_OK);
+
+    CHECK(sensor.calibration_loaded);
+
+    CHECK(bmp280_spi_measure(&sensor, &result) ==
+          ESP_OK);
+}
+
+/*
+ * Exercise NULL sensor and NULL output validation.
+ */
+static void test_measurement_null_arguments(void)
+{
+    reset_mock();
+
+    bmp280_spi_t sensor =
+        calibrated_reference_sensor();
+
+    bmp280_measurement_t result = {0};
+
+    CHECK(bmp280_spi_measure(NULL, &result) ==
+          ESP_ERR_INVALID_STATE);
+
+    CHECK(bmp280_spi_measure(&sensor, NULL) ==
+          ESP_ERR_INVALID_STATE);
+}
+
+/* -----------------------------------------------------
  * Test runner
  * ----------------------------------------------------- */
 
@@ -622,6 +776,13 @@ int main(void)
     TEST(test_measurement_data_read_failure);
     TEST(test_invalid_adc);
     TEST(test_recovery_after_spi_failure);
+
+    /* Pass 10.11 */
+    TEST(test_invalid_calibration_boundaries);
+    TEST(test_invalid_temperature_adc);
+    TEST(test_measurement_preserves_output_on_failure);
+    TEST(test_calibration_reload_failure);
+    TEST(test_measurement_null_arguments);
 
     printf(
         "ALL %d BMP280 NATIVE TEST GROUPS PASSED\n",

@@ -95,33 +95,3 @@ if(ENABLE_COVERAGE)
 
     message(STATUS "Native C coverage enabled")
 endif()
-
-
-# Pass 10.10 — Optional coverage instrumentation
-
-option(ENABLE_COVERAGE
-    "Enable GCC coverage instrumentation"
-    OFF
-)
-
-if(ENABLE_COVERAGE)
-    if(NOT CMAKE_C_COMPILER_ID STREQUAL "GNU")
-        message(FATAL_ERROR
-            "Coverage requires GCC"
-        )
-    endif()
-
-    foreach(target IN ITEMS test_spi_bus test_bmp280_spi)
-        target_compile_options(${target} PRIVATE
-            -O0
-            -g
-            --coverage
-        )
-
-        target_link_options(${target} PRIVATE
-            --coverage
-        )
-    endforeach()
-
-    message(STATUS "Coverage instrumentation enabled")
-endif()

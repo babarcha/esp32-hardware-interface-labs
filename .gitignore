@@ -17,3 +17,9 @@
 
 # Generated test reports
 **/reports/
+
+# SPI Lab 03 generated artifacts
+/spi/lab03_spi_master/build-coverage/
+/spi/lab03_spi_master/build-coverage-ci/
+/spi/lab03_spi_master/reports/coverage/
+/spi/lab03_spi_master/reports/coverage-ci/
