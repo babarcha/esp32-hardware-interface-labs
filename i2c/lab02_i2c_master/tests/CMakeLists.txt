@@ -62,3 +62,26 @@ add_test(
     NAME sensor_manager
     COMMAND test_sensor_manager
 )
+
+
+# Optional GCC coverage instrumentation.
+option(ENABLE_COVERAGE "Enable native C test coverage" OFF)
+
+if(ENABLE_COVERAGE)
+    if(NOT CMAKE_C_COMPILER_ID STREQUAL "GNU")
+        message(FATAL_ERROR "Coverage requires GCC")
+    endif()
+
+    foreach(target IN ITEMS
+        test_bmp280_compensation
+        test_i2c_bus
+        test_sensor_manager
+    )
+        target_compile_options(${target} PRIVATE
+            --coverage
+            -O0
+            -g
+        )
+        target_link_options(${target} PRIVATE --coverage)
+    endforeach()
+endif()

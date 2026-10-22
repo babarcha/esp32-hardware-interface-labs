@@ -1,0 +1,56 @@
+
+name: I2C Native Tests and Coverage
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  native-tests:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build and coverage tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build gcovr
+
+      - name: Configure native tests
+        working-directory: i2c/lab02_i2c_master
+        run: |
+          cmake -S tests -B build-coverage -G Ninja \
+            -DCMAKE_C_COMPILER=gcc \
+            -DENABLE_COVERAGE=ON
+
+      - name: Build native tests
+        working-directory: i2c/lab02_i2c_master
+        run: cmake --build build-coverage
+
+      - name: Execute CTest
+        working-directory: i2c/lab02_i2c_master
+        run: ctest --test-dir build-coverage --output-on-failure
+
+      - name: Generate coverage reports
+        working-directory: i2c/lab02_i2c_master
+        run: |
+          mkdir -p coverage-report
+
+          gcovr \
+            --root . \
+            --object-directory build-coverage \
+            --filter 'main/.*\.c$' \
+            --exclude 'main/main\.c$' \
+            --txt \
+            --html-details coverage-report/index.html
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: i2c-native-coverage
+          path: i2c/lab02_i2c_master/coverage-report/
+          retention-days: 14
