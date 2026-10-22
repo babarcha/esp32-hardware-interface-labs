@@ -1,353 +1,184 @@
 # ESP32 Hardware Interface & Validation Labs
 
-Hands-on embedded systems labs for developing and validating common hardware
-interfaces on the ESP32 using C/C++, ESP-IDF, Python, and hardware-oriented
-test workflows.
+**Embedded C · ESP-IDF · UART · I²C · SPI · CAN/TWAI · Native Unit Tests · Python HIL · GitHub Actions**
 
-The repository progresses through four fundamental embedded communication
-interfaces:
+A hands-on embedded software engineering portfolio comprising four ESP32 peripheral labs. The emphasis is on **modular firmware, hardware abstraction, defensive interfaces, reproducible testing, and evidence-based qualification**—not simply successful peripheral initialization.
 
-- UART
-- I²C
-- SPI
-- CAN/TWAI
+**Qualification snapshot (22 October 2026):** All four labs passed their reported host-native tests. Physical UART and I²C verification has been demonstrated; physical SPI and CAN/TWAI validation remains pending. See the [Project Qualification Report](docs/PROJECT_QUALIFICATION_REPORT.md) for commands, evidence, and limitations.
 
-The focus is not only on making the interfaces work, but also on developing
-reusable driver abstractions, validating behavior, handling error conditions,
-and separating application logic from hardware-specific implementation.
+## At a glance
 
-## Repository Structure
+| Lab | Interface | Implemented scope | Native verification | Physical verification |
+|---|---|---|---|---|
+| [01](uart/lab01_uart_loopback/) | UART | Serial command protocol, parsing, host communication | **11 protocol tests passed** | Prior ESP32–host exchange verified |
+| [02](i2c/lab02_i2c_master/) | I²C | Bus abstraction, BMP280 sensor integration, status/reinitialization | **3/3 CTest executables passed** | **16/16 BMP280 HIL cases passed**; SDA fault injection and post-restart recovery |
+| [03](spi/lab03_spi_master/) | SPI | Bus/device abstraction and BMP280 SPI driver | **2/2 CTest executables passed** | Pending physical SPI sensor test |
+| [04](can/lab04_twai/) | CAN/TWAI | Driver lifecycle, frame validation, TX/RX API | **14 native test groups passed** | Pending external transceiver and second CAN node |
+
+> Test counts have different granularities: individual UART cases, CTest executables, and CAN/TWAI test groups. They should not be interpreted as equivalent test-case counts.
+
+## Architecture and verification strategy
+
+```text
+                    Developer / GitHub Actions
+                              |
+                +-------------+-------------+
+                |                           |
+         Host-native tests             Physical HIL tests
+         (GCC, CTest, mocks)          (Python, pytest, serial)
+                |                           |
+                +-------------+-------------+
+                              |
+                     Firmware interface API
+                              |
+            +-----------------+------------------+
+            |                 |                  |
+       Protocol /        Bus / device       Lifecycle and
+       application       abstractions       error handling
+            |                 |                  |
+            +-----------------+------------------+
+                              |
+                       ESP-IDF drivers
+                              |
+                       ESP32 peripherals
+                              |
+                  Physical bus and device
+                  (when connected and tested)
+```
+
+The labs separate **host-native software behavior**, **firmware/peripheral execution**, and **electrical bus/device behavior**. A passing mocked unit test does not establish a successful physical transfer. Likewise, controller initialization alone does not prove CAN frame acknowledgment or SPI peripheral communication.
+
+## Repository structure
 
 ```text
 esp32-hardware-interface-labs/
-│
-├── uart/
-│   └── lab01_uart_loopback/
-│
-├── i2c/
-│   └── lab02_i2c_master/
-│
-├── spi/
-│   └── lab03_spi_master/
-│
-└── can/
-    └── lab04_twai/
+├── uart/lab01_uart_loopback/
+├── i2c/lab02_i2c_master/
+├── spi/lab03_spi_master/
+├── can/lab04_twai/
+├── docs/
+│   └── PROJECT_QUALIFICATION_REPORT.md
+└── .github/workflows/
 ```
 
-## Labs
+Each lab maintains its own firmware and validation assets. See the lab directories for their current implementation, tests, and documentation.
 
-| Lab | Interface | Main Concepts | Status |
-|---|---|---|---|
-| 01 | UART | Serial protocol, command parsing, Python host testing | Hardware validated |
-| 02 | I²C | Master bus, scanning, device abstraction, read/write API | Software validated; peripheral testing pending |
-| 03 | SPI | Master bus, device registration, full-duplex transfers, abstraction | Software validated; peripheral testing pending |
-| 04 | CAN/TWAI | Controller lifecycle, CAN frames, TX/RX API, validation | Controller validated; physical CAN bus testing pending |
+## Lab highlights
 
----
+### UART — protocol and host automation
 
-## Lab 01 — UART
+UART2 uses **TX GPIO17**, **RX GPIO16**, and **115200 baud, 8N1** for the loopback exercise. The command protocol supports `PING`, `GET_INFO`, `GET_COUNTER`, and an explicit unknown-command response. A Python host client and tests exercise command/response behavior. The host-native C protocol suite passed **11 tests**.
 
-Implements UART communication between the ESP32 and a host-side Python
-application.
+### I²C — BMP280 integration and fault handling
 
-Example command protocol:
+I²C controller 0 uses **SDA GPIO21** and **SCL GPIO22**. A connected BMP280 was observed at address **0x76** with chip ID **0x58**. The implementation separates I²C bus operations, sensor logic, and the UART-facing HIL protocol.
 
-```text
-PING
-→ PONG
+Physical Python HIL regression passed **16/16 cases**. A controlled SDA-disconnect experiment verified that the UART interface remained responsive while sensor commands reported unavailable status. Normal readings resumed **after restoring SDA and restarting the ESP32**; autonomous hot recovery without restart has **not** been established.
 
-GET_INFO
-→ MODEL=ESP32;FW=1.0.0
+Prior native coverage for the three instrumented production modules (`bmp280_compensation.c`, `i2c_bus.c`, `sensor_manager.c`) was **98.7% lines**, **95.7% branches**, and **100% functions**. These numbers **do not represent whole-firmware coverage**.
 
-GET_COUNTER
-→ COUNTER=n
-```
+Detailed evidence: [I²C Lab 02 Verification Report](i2c/lab02_i2c_master/docs/I2C_LAB02_VERIFICATION.md).
 
-The lab includes automated host-side testing with `pytest`.
+### SPI — bus abstraction and BMP280 driver
 
-Key concepts:
+SPI3 configuration: **MOSI GPIO23**, **MISO GPIO19**, **SCLK GPIO18**, **CS GPIO5**. The lab includes native tests for the SPI bus and BMP280 SPI driver; **2/2 CTest executables passed**. A connected SPI peripheral still needs to be tested physically before claiming end-to-end SPI qualification.
 
-- UART configuration
-- command/response protocols
-- newline framing
-- parser robustness
-- host/device communication
-- PySerial
-- automated hardware testing
+### CAN/TWAI — defensive controller lifecycle
 
----
+The ESP32 TWAI configuration uses **TX GPIO21**, **RX GPIO22**, **500 kbit/s**, and normal mode. Native tests cover installation/start/stop lifecycle, failure/retry behavior, invalid message arguments, DLC and identifier bounds, and mocked transmit/receive paths. **14 native test groups passed**.
 
-## Lab 02 — I²C Master
+Physical CAN requires an appropriate **external transceiver** and **another CAN node**. The native tests do not demonstrate electrical CAN traffic or acknowledgment.
 
-Implements an ESP32 I²C master using the ESP-IDF modern I²C master API.
+## Reproduce the native qualification tests
 
-Architecture:
+Run the following in **PowerShell from the repository root**. Use a compatible GCC toolchain (the recorded Windows runs used MSYS2 UCRT64 GCC) and have CMake/CTest available for the I²C and SPI builds.
 
-```text
-Application
-    |
-    v
-i2c_bus.c / i2c_bus.h
-    |
-    v
-ESP-IDF I²C driver
-    |
-    v
-ESP32 I²C controller
-    |
-    v
-I²C peripheral
-```
-
-Implemented functionality includes:
-
-- I²C controller initialization
-- bus scanning
-- device registration
-- write operations
-- read operations
-- combined write/read transactions
-- device removal
-- bus deinitialization
-
-Physical peripheral validation remains a future extension.
-
----
-
-## Lab 03 — SPI Master
-
-Implements an ESP32 SPI master with a reusable abstraction layer.
-
-Default configuration:
-
-```text
-MOSI : GPIO23
-MISO : GPIO19
-SCLK : GPIO18
-CS   : GPIO5
-```
-
-Implemented functionality includes:
-
-- SPI bus initialization
-- device registration
-- configurable clock and SPI mode
-- write transactions
-- read transactions
-- full-duplex transfers
-- lifecycle management
-- argument and state validation
-
-A real SPI peripheral such as an MCP3008 ADC can be used for complete
-hardware validation.
-
----
-
-## Lab 04 — CAN/TWAI
-
-Uses the ESP32's integrated TWAI controller for Classical CAN communication.
-
-Configuration:
-
-```text
-TX      : GPIO21
-RX      : GPIO22
-Bitrate : 500 kbit/s
-Mode    : Normal
-```
-
-Architecture:
-
-```text
-Application
-    |
-    v
-twai_bus.c / twai_bus.h
-    |
-    v
-ESP-IDF TWAI driver
-    |
-    v
-ESP32 TWAI controller
-    |
-    v
-CAN transceiver
-    |
-    v
-CANH / CANL
-```
-
-Implemented functionality includes:
-
-- TWAI driver initialization
-- controller start/stop
-- standard and extended CAN frame validation
-- transmit API
-- receive API
-- configurable timeouts
-- lifecycle validation
-- DLC validation
-- CAN identifier validation
-
-Example frame:
-
-```text
-Identifier : 0x123
-Format     : Standard 11-bit
-DLC        : 3
-Data       : AA BB CC
-```
-
-The ESP32 TWAI controller has been exercised in firmware. Complete physical
-CAN validation requires an external CAN transceiver and another CAN node.
-
----
-
-## Validation Philosophy
-
-The labs distinguish between three different levels of validation:
-
-```text
-Software/API validation
-        |
-        v
-MCU peripheral validation
-        |
-        v
-Physical bus/device validation
-```
-
-A successful driver call does not necessarily prove that the physical
-interface is operating correctly.
-
-For example:
-
-```text
-SPI transaction succeeds
-        !=
-external SPI peripheral responded correctly
-```
-
-and:
-
-```text
-TWAI controller starts
-        !=
-CAN frame was transmitted and acknowledged
-```
-
-This distinction is important when developing production-oriented embedded
-validation systems.
-
-## Development Environment
-
-The labs were developed using:
-
-- ESP32
-- ESP-IDF 5.5.x
-- C/C++
-- Python
-- pytest
-- PySerial
-- CMake
-- Ninja
-- Git
-- GitHub
-- Windows 11
-- Visual Studio Code
-
-## Building a Lab
-
-Activate the ESP-IDF environment first.
-
-Example:
+### UART
 
 ```powershell
-C:\Espressif\frameworks\esp-idf-v5.5.5\export.ps1
+New-Item -ItemType Directory -Force qualification-build
+
+gcc -std=c11 -Wall -Wextra -Werror -pedantic `
+  -I uart/lab01_uart_loopback/main `
+  uart/lab01_uart_loopback/main/protocol.c `
+  uart/lab01_uart_loopback/tests/native/test_protocol.c `
+  -o qualification-build/uart_protocol_tests.exe
+
+.\qualification-build\uart_protocol_tests.exe
 ```
 
-Navigate to a lab:
+### CAN/TWAI
 
 ```powershell
-cd can\lab04_twai
+New-Item -ItemType Directory -Force qualification-build
+
+gcc -std=c11 -Wall -Wextra -Werror -pedantic `
+  -I can/lab04_twai/tests/native/mocks `
+  -I can/lab04_twai/main `
+  can/lab04_twai/main/twai_bus.c `
+  can/lab04_twai/tests/native/test_twai_bus.c `
+  -o qualification-build/twai_native_tests.exe
+
+.\qualification-build\twai_native_tests.exe
 ```
 
-Build:
+### I²C
 
 ```powershell
+cmake -S i2c/lab02_i2c_master/tests `
+  -B i2c/lab02_i2c_master/build-native `
+  -G Ninja `
+  -DCMAKE_C_COMPILER=C:/msys64/ucrt64/bin/gcc.exe
+cmake --build i2c/lab02_i2c_master/build-native
+ctest --test-dir i2c/lab02_i2c_master/build-native --output-on-failure
+```
+
+### SPI
+
+```powershell
+cmake -S spi/lab03_spi_master/tests/native `
+  -B spi/lab03_spi_master/build-ninja `
+  -G Ninja `
+  -DCMAKE_C_COMPILER=C:/msys64/ucrt64/bin/gcc.exe
+cmake --build spi/lab03_spi_master/build-ninja
+ctest --test-dir spi/lab03_spi_master/build-ninja --output-on-failure
+```
+
+Use a fresh build directory when switching CMake generators; do not reconfigure a `MinGW Makefiles` build directory in place with `Ninja`. The above configuration commands are reproducibility instructions; the recorded SPI pass used an existing build directory.
+
+## Build and flash ESP32 firmware
+
+The labs use **ESP-IDF 5.5.x** (recorded development environment: **5.5.5**), Windows 11, VS Code, CMake/Ninja, Python, and Git.
+
+Open an **ESP-IDF-enabled PowerShell** session, then select a lab. For example:
+
+```powershell
+cd can/lab04_twai
 idf.py build
-```
-
-Flash:
-
-```powershell
 idf.py -p COM3 flash
-```
-
-Monitor:
-
-```powershell
 idf.py -p COM3 monitor
 ```
 
-Exit the monitor with:
+Replace `COM3` with the actual serial port. Exit the serial monitor using **Ctrl + ]**. ESP-IDF firmware builds and physical HIL runs require the appropriate environment and hardware; the native C tests do not require an ESP32.
 
-```text
-Ctrl + ]
-```
+## CI and qualification evidence
 
-The serial port may differ between systems.
+GitHub Actions workflow definitions include UART, I²C, SPI, and TWAI native tests, plus I²C coverage. An earlier [I²C coverage workflow run](https://github.com/babarcha/esp32-hardware-interface-labs/actions/runs/39789894330) completed successfully and uploaded a coverage artifact. **Green status for every workflow on the latest commit has not yet been independently verified.**
 
-## Hardware Validation Roadmap
+- [Project-wide qualification report](docs/PROJECT_QUALIFICATION_REPORT.md) — test commands, results, limitations, and qualification decision
+- [I²C detailed verification report](i2c/lab02_i2c_master/docs/I2C_LAB02_VERIFICATION.md) — physical HIL, fault injection, recovery, and scoped coverage
+- [GitHub Actions workflows](.github/workflows/) — native CI definitions
 
-The next stage is to add real peripherals to the software-complete interfaces:
+## Engineering skills demonstrated
 
-```text
-I²C
- └── real I²C sensor/peripheral
+Embedded C, ESP-IDF, UART/I²C/SPI/CAN interfaces, hardware abstraction, protocol design, lifecycle and state management, negative/boundary testing, mock-based native unit tests, Python/pytest/PySerial HIL, CMake/Ninja, GCC warning discipline, coverage reporting, GitHub Actions, and Git-based version control.
 
-SPI
- └── MCP3008 ADC
-       ├── CH0 → GND      ≈ 0
-       └── CH0 → VREF     ≈ full scale
+## Open validation work
 
-CAN/TWAI
- └── CAN transceiver
-       └── CANH/CANL
-             └── second CAN node
-```
+1. Validate SPI communication against a physically connected BMP280 or other compatible peripheral and document observed transfers.
+2. Validate CAN/TWAI frames over a physical bus with an external transceiver and a second node.
+3. Repeat all four ESP-IDF firmware builds at the final qualification revision.
+4. Confirm current GitHub Actions results for each workflow.
+5. Extend fault, timing, and robustness testing as hardware becomes available.
 
-These extensions will allow end-to-end validation from application software
-through the ESP32 peripheral and electrical interface to the external device.
-
-## Skills Demonstrated
-
-This repository demonstrates practical experience with:
-
-- embedded C/C++
-- ESP32 and ESP-IDF
-- UART, I²C, SPI, and CAN/TWAI
-- hardware abstraction layers
-- embedded communication protocols
-- defensive API design
-- state and lifecycle management
-- error handling
-- hardware/software integration
-- Python-based hardware testing
-- pytest
-- serial communication
-- CMake/Ninja build systems
-- Git-based development
-
-## Future Work
-
-Planned extensions include:
-
-- real I²C peripheral validation
-- MCP3008 SPI ADC integration
-- physical CAN/TWAI communication
-- second-node CAN testing
-- automated host-side validation
-- additional negative and boundary tests
-- CI for software-only tests
-- separation of hardware-dependent and hardware-independent tests
+**Qualification decision:** **PASS for host-native software testing across four labs; PARTIAL for physical hardware qualification.** This is an engineering learning and portfolio project, not a production safety certification.
