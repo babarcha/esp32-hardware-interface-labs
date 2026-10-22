@@ -1,42 +1,28 @@
 
 cmake_minimum_required(VERSION 3.16)
-
 project(bmp280_native_tests C)
-
 enable_testing()
 
-add_executable(
-    test_bmp280_compensation
+add_executable(test_bmp280_compensation
     test_bmp280_compensation.c
     ../main/bmp280_compensation.c
 )
+target_include_directories(test_bmp280_compensation PRIVATE ../main)
 
-target_include_directories(
-    test_bmp280_compensation
-    PRIVATE
-    ../main
+add_executable(test_i2c_bus
+    native/test_i2c_bus.c
+    ../main/i2c_bus.c
 )
+target_include_directories(test_i2c_bus PRIVATE native/mocks ../main)
 
-set_target_properties(
-    test_bmp280_compensation
-    PROPERTIES
-    C_STANDARD 11
-    C_STANDARD_REQUIRED YES
-)
+foreach(target IN ITEMS test_bmp280_compensation test_i2c_bus)
+    set_target_properties(${target} PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Werror)
+    endif()
+endforeach()
 
-if(MSVC)
-    target_compile_options(
-        test_bmp280_compensation
-        PRIVATE /W4
-    )
-else()
-    target_compile_options(
-        test_bmp280_compensation
-        PRIVATE -Wall -Wextra -Werror
-    )
-endif()
-
-add_test(
-    NAME bmp280_compensation
-    COMMAND test_bmp280_compensation
-)
+add_test(NAME bmp280_compensation COMMAND test_bmp280_compensation)
+add_test(NAME i2c_bus COMMAND test_i2c_bus)
